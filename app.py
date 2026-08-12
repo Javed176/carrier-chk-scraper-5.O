@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import asyncio
 
-# Page config MUST be the first Streamlit command
+# Must be the very first Streamlit command
 st.set_page_config(
     page_title='MC Carrier Lookup',
     page_icon='🚛',
@@ -34,7 +34,7 @@ try:
         render_error_card
     )
 except Exception as import_err:
-    st.error(f"Initialization Error: Failed to import required modules. {import_err}")
+    st.error(f"Initialization Error: Failed to load required modules: {import_err}")
     st.stop()
 
 @st.cache_data(ttl=3600, show_spinner=False)
@@ -44,6 +44,33 @@ def get_fmcsa_data(mc_number, api_key):
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_carrier_profile(dot_number):
     return scrape_carrier_profile(dot_number)
+
+def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
+    """Merges FMCSA primary response into profile data as fallbacks for any missing fields."""
+    p = profile_data or {}
+    f = fmcsa_data or {}
+    
+    comp = p.get('company', {})
+    if comp.get('legal_name', 'N/A') in ['N/A', 'Unknown', '']:
+        comp['legal_name'] = f.get('legal_name', 'Unknown Carrier')
+    if comp.get('dba_name', 'N/A') in ['N/A', '']:
+        comp['dba_name'] = f.get('dba_name', '')
+    if comp.get('dot_number', 'N/A') in ['N/A', '']:
+        comp['dot_number'] = str(f.get('dot_number', 'N/A'))
+    if comp.get('mc_number', 'N/A') in ['N/A', '']:
+        comp['mc_number'] = str(f.get('docket_number', 'N/A'))
+    if comp.get('operating_status', 'N/A') in ['N/A', 'Unknown', '']:
+        comp['operating_status'] = f.get('status', 'Unknown')
+    p['company'] = comp
+
+    contact = p.get('contact', {})
+    if contact.get('physical_address', 'N/A') in ['N/A', '']:
+        contact['physical_address'] = f.get('physical_address', 'N/A')
+    if contact.get('phone', 'N/A') in ['N/A', '']:
+        contact['phone'] = f.get('phone', 'N/A')
+    p['contact'] = contact
+
+    return p
 
 def main():
     inject_custom_css()
@@ -120,13 +147,15 @@ def main():
             if not dot_number:
                 raise Exception("USDOT number not found in FMCSA response.")
 
-            with st.spinner('Scraping carrier profile from dotsearch.io...'):
-                profile = get_carrier_profile(str(dot_number))
+            with st.spinner('Fetching carrier profile details...'):
+                raw_profile = get_carrier_profile(str(dot_number))
+            
+            profile = merge_fmcsa_and_profile(fmcsa_data, raw_profile)
             
             st.divider()
             
             if "error" in profile and profile["error"]:
-                st.warning(f"Note: {profile['error']}")
+                st.info(f"Information: {profile['error']}")
             
             render_company_card(profile.get('company', {}))
                 
@@ -145,17 +174,13 @@ def main():
                 render_authority_section(profile.get('authority', {}))
 
         except FMCSAAuthError:
-            render_error_card('Invalid API Key', 'The provided FMCSA WebKey is invalid or expired. Please check your configuration.')
+            render_error_card('Invalid API Key', 'The provided FMCSA WebKey is invalid or expired. Please check your configuration in the sidebar.')
         except FMCSANotFoundError:
-            render_error_card('MC Number Not Found', f"Could not find a carrier with MC Number {mc}.")
+            render_error_card('MC Number Not Found', f"Could not find a carrier matching MC Number {mc}.")
         except FMCSAError as e:
             render_error_card('FMCSA API Error', str(e))
         except Exception as e:
-            err_msg = str(e).lower()
-            if 'scrape' in err_msg or 'playwright' in err_msg or 'timeout' in err_msg:
-                render_error_card('Scraping Error', f"Failed to retrieve profile data from dotsearch.io. Details: {str(e)}")
-            else:
-                render_error_card('Unexpected Error', f"An unexpected error occurred: {str(e)}")
+            render_error_card('Unexpected Error', f"An error occurred: {str(e)}")
                 
     st.divider()
     st.markdown(
