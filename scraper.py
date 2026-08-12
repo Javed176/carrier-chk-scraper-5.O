@@ -2,7 +2,6 @@ import sys
 import asyncio
 import logging
 import re
-import requests
 import cloudscraper
 from bs4 import BeautifulSoup
 
@@ -154,6 +153,9 @@ def _parse_html(html_content: str) -> dict:
         if h1:
             legal_name = h1.get_text(strip=True)
 
+    # Preview first 2000 characters of HTML for debugging
+    html_preview = html_content[:2000]
+
     return {
         'company': {
             'legal_name': legal_name if legal_name and legal_name != 'N/A' else 'Unknown',
@@ -179,10 +181,10 @@ def _parse_html(html_content: str) -> dict:
         'insurance': {},
         'authority': {},
         'source': 'cloudscraper',
+        'html_preview': html_preview,
     }
 
 def scrape_carrier_profile(dot_number: int) -> dict:
-    """Scrape carrier profile from dotsearch.io using cloudscraper."""
     url = f"https://dotsearch.io/dot/{dot_number}"
     logger.info(f"Scraping with cloudscraper: {url}")
     try:
