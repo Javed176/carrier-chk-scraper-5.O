@@ -1,7 +1,6 @@
 import streamlit as st
 
 def inject_custom_css():
-    """Injects custom CSS for a premium, glassmorphism UI design."""
     css = """
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
@@ -18,17 +17,13 @@ def inject_custom_css():
             --accent-blue: #3b82f6;
         }
 
-        /* Global Font Settings */
         html, body, [class*="css"]  {
             font-family: 'Inter', sans-serif;
             color: var(--text-main);
         }
 
-        h1, h2, h3, h4, h5, h6 {
-            font-weight: 600;
-        }
+        h1, h2, h3, h4, h5, h6 { font-weight: 600; }
 
-        /* Glassmorphism Cards */
         .glass-card {
             background: var(--card-bg);
             backdrop-filter: blur(12px);
@@ -47,7 +42,6 @@ def inject_custom_css():
             border-color: rgba(255, 255, 255, 0.2);
         }
 
-        /* Gradients */
         .gradient-text {
             background: var(--primary-gradient);
             -webkit-background-clip: text;
@@ -56,7 +50,6 @@ def inject_custom_css():
             display: inline-block;
         }
 
-        /* Badges */
         .badge {
             display: inline-flex;
             align-items: center;
@@ -86,7 +79,6 @@ def inject_custom_css():
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
-        /* Metrics */
         .metric-container {
             text-align: center;
             padding: 16px;
@@ -95,20 +87,9 @@ def inject_custom_css():
             border: 1px solid var(--card-border);
         }
         
-        .metric-label {
-            font-size: 0.875rem;
-            color: var(--text-muted);
-            margin-bottom: 4px;
-        }
+        .metric-label { font-size: 0.875rem; color: var(--text-muted); margin-bottom: 4px; }
+        .metric-value { font-size: 1.5rem; font-weight: 700; color: var(--text-main); font-family: 'JetBrains Mono', monospace; }
 
-        .metric-value {
-            font-size: 1.5rem;
-            font-weight: 700;
-            color: var(--text-main);
-            font-family: 'JetBrains Mono', monospace;
-        }
-
-        /* Chips / Tags */
         .chip {
             display: inline-block;
             padding: 4px 12px;
@@ -120,67 +101,10 @@ def inject_custom_css():
             color: var(--text-main);
         }
 
-        /* Tables/Grid Layouts for info */
-        .info-grid {
-            display: grid;
-            grid-template-columns: 1fr 1fr;
-            gap: 16px;
-        }
-        
-        .info-label {
-            color: var(--text-muted);
-            font-size: 0.875rem;
-            margin-bottom: 2px;
-        }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .info-label { color: var(--text-muted); font-size: 0.875rem; margin-bottom: 2px; }
+        .info-value { font-size: 1rem; font-weight: 500; }
 
-        .info-value {
-            font-size: 1rem;
-            font-weight: 500;
-        }
-
-        /* Loading Spinner */
-        .spinner-container {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            padding: 40px;
-        }
-
-        .lds-ellipsis {
-            display: inline-block;
-            position: relative;
-            width: 80px;
-            height: 80px;
-        }
-        .lds-ellipsis div {
-            position: absolute;
-            top: 33px;
-            width: 13px;
-            height: 13px;
-            border-radius: 50%;
-            background: #a855f7;
-            animation-timing-function: cubic-bezier(0, 1, 1, 0);
-        }
-        .lds-ellipsis div:nth-child(1) { left: 8px; animation: lds-ellipsis1 0.6s infinite; }
-        .lds-ellipsis div:nth-child(2) { left: 8px; animation: lds-ellipsis2 0.6s infinite; }
-        .lds-ellipsis div:nth-child(3) { left: 32px; animation: lds-ellipsis2 0.6s infinite; }
-        .lds-ellipsis div:nth-child(4) { left: 56px; animation: lds-ellipsis3 0.6s infinite; }
-
-        @keyframes lds-ellipsis1 {
-            0% { transform: scale(0); }
-            100% { transform: scale(1); }
-        }
-        @keyframes lds-ellipsis3 {
-            0% { transform: scale(1); }
-            100% { transform: scale(0); }
-        }
-        @keyframes lds-ellipsis2 {
-            0% { transform: translate(0, 0); }
-            100% { transform: translate(24px, 0); }
-        }
-
-        /* Messages / Alerts */
         .msg-card {
             padding: 16px;
             border-radius: 12px;
@@ -198,7 +122,6 @@ def inject_custom_css():
     st.markdown(css, unsafe_allow_html=True)
 
 def render_header():
-    """Renders the main app header."""
     html = """
     <div style="text-align: center; padding-bottom: 2rem;">
         <h1 class="gradient-text" style="font-size: 3rem; margin-bottom: 0.5rem;">MC Lookup Pro</h1>
@@ -208,26 +131,88 @@ def render_header():
     st.markdown(html, unsafe_allow_html=True)
 
 def render_status_badge(status: str) -> str:
-    """Returns HTML for a status badge based on text."""
     if not status:
         return '<span class="badge badge-gray">UNKNOWN</span>'
         
     s = str(status).upper().strip()
-    if s in ['ACTIVE', 'AUTHORIZED', 'SATISFACTORY']:
+    if s in ['ACTIVE', 'AUTHORIZED', 'SATISFACTORY', 'Y']:
         cls = 'badge-active'
-    elif s in ['INACTIVE', 'NOT AUTHORIZED', 'CONDITIONAL']:
+        s_text = 'AUTHORIZED' if s == 'Y' else s
+    elif s in ['INACTIVE', 'NOT AUTHORIZED', 'CONDITIONAL', 'N']:
         cls = 'badge-inactive'
+        s_text = 'NOT AUTHORIZED' if s == 'N' else s
     elif s in ['REVOKED', 'UNSATISFACTORY']:
         cls = 'badge-revoked'
+        s_text = s
     elif s == 'OUT OF SERVICE':
         cls = 'badge-oos'
+        s_text = s
     else:
         cls = 'badge-gray'
+        s_text = s
         
-    return f'<span class="badge {cls}">{s}</span>'
+    return f'<span class="badge {cls}">{s_text}</span>'
+
+def render_carrier_table(data: dict):
+    """Renders carrier summary as a styled data table matching user design."""
+    if not data:
+        return
+        
+    comp = data.get('company', {})
+    contact = data.get('contact', {})
+    
+    mc = comp.get('mc_number', 'N/A')
+    if not mc or mc == 'None' or mc == 'N/A':
+        mc = data.get('searched_mc', 'N/A')
+    if mc != 'N/A' and not str(mc).upper().startswith('MC'):
+        mc = f"MC-{mc}"
+        
+    name = comp.get('legal_name', 'Unknown Carrier')
+    dba = comp.get('dba_name', '')
+    if dba:
+        name_display = f"<strong>{name}</strong><br/><span style='color:var(--text-muted); font-size:0.8rem;'>DBA: {dba}</span>"
+    else:
+        name_display = f"<strong>{name}</strong>"
+        
+    entity_type = comp.get('entity_type', 'CARRIER')
+    status = comp.get('operating_status', 'UNKNOWN')
+    phone = contact.get('phone', 'N/A')
+    email = contact.get('email', 'N/A')
+    location = contact.get('physical_address', 'N/A')
+
+    badge_html = render_status_badge(status)
+    
+    html = f"""
+    <div style="margin-bottom: 24px; overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse; background: var(--card-bg); border: 1px solid var(--card-border); border-radius: 12px; font-size: 0.9rem;">
+            <thead>
+                <tr style="background: rgba(30, 41, 59, 0.9); border-bottom: 2px solid var(--card-border);">
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">MC NUMBER</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">CARRIER / BROKER NAME</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">ENTITY TYPE</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">OPERATING STATUS</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">PHONE NUMBER</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">EMAIL ADDRESS</th>
+                    <th style="padding: 14px 16px; text-align: left; color: #818CF8; font-weight: 600; font-size: 0.75rem; letter-spacing: 0.05em; text-transform: uppercase;">LOCATION</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="padding: 16px; font-family: 'JetBrains Mono', monospace; font-weight: 600; color: #A5B4FC;">{mc}</td>
+                    <td style="padding: 16px;">{name_display}</td>
+                    <td style="padding: 16px;">{entity_type}</td>
+                    <td style="padding: 16px;">{badge_html}</td>
+                    <td style="padding: 16px;">{phone}</td>
+                    <td style="padding: 16px;">{email}</td>
+                    <td style="padding: 16px;">{location}</td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+    """
+    st.markdown(html, unsafe_allow_html=True)
 
 def render_fmcsa_summary(data: dict):
-    """Quick summary from the FMCSA primary endpoint."""
     if not data:
         return
         
@@ -235,6 +220,8 @@ def render_fmcsa_summary(data: dict):
     dba = data.get('dba_name', '')
     dot = data.get('dot_number', 'N/A')
     mc = data.get('mc_number', data.get('docket_number', 'N/A'))
+    if not mc or mc == 'None':
+        mc = data.get('searched_mc', 'N/A')
     status = data.get('status', 'Unknown')
     
     html = f"""
@@ -245,8 +232,8 @@ def render_fmcsa_summary(data: dict):
                 <h2 style="margin:0; font-size: 1.5rem;">{name}</h2>
                 {f'<div style="color: var(--text-muted); margin-bottom: 8px;">DBA: {dba}</div>' if dba else ''}
                 <div style="display:flex; gap: 16px; margin-top:8px;">
-                    <div><span class="info-label">USDOT:</span> <span class="info-value" style="font-family:'JetBrains Mono',monospace">{dot}</span></div>
-                    <div><span class="info-label">MC:</span> <span class="info-value" style="font-family:'JetBrains Mono',monospace">{mc}</span></div>
+                    <div><span class="info-label">USDOT:</span> <span class="info-value" style="font-family:\'JetBrains Mono\',monospace">{dot}</span></div>
+                    <div><span class="info-label">MC:</span> <span class="info-value" style="font-family:\'JetBrains Mono\',monospace">{mc}</span></div>
                 </div>
             </div>
             <div>
@@ -258,7 +245,6 @@ def render_fmcsa_summary(data: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_company_card(data: dict):
-    """Detailed company identity card."""
     if not data:
         return
 
@@ -281,11 +267,11 @@ def render_company_card(data: dict):
         <div class="info-grid">
             <div>
                 <div class="info-label">USDOT Number</div>
-                <div class="info-value" style="font-family:'JetBrains Mono',monospace">{dot}</div>
+                <div class="info-value" style="font-family:\'JetBrains Mono\',monospace">{dot}</div>
             </div>
             <div>
                 <div class="info-label">MC/FF Number</div>
-                <div class="info-value" style="font-family:'JetBrains Mono',monospace">{mc}</div>
+                <div class="info-value" style="font-family:\'JetBrains Mono\',monospace">{mc}</div>
             </div>
             <div>
                 <div class="info-label">Entity Type</div>
@@ -301,7 +287,6 @@ def render_company_card(data: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_contact_section(data: dict):
-    """Contact information section."""
     if not data:
         return
 
@@ -331,7 +316,6 @@ def render_contact_section(data: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_operations_section(data: dict):
-    """Operations metrics and cargo types."""
     if not data:
         return
         
@@ -365,7 +349,6 @@ def render_operations_section(data: dict):
         """, unsafe_allow_html=True)
 
 def render_safety_section(data: dict):
-    """Safety and inspection metrics."""
     if not data:
         return
 
@@ -413,7 +396,6 @@ def render_safety_section(data: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_insurance_section(data: dict):
-    """Insurance and authority status."""
     if not data:
         return
 
@@ -427,7 +409,7 @@ def render_insurance_section(data: dict):
     html = f"""
     <div class="glass-card">
         <h3 style="margin-top:0; margin-bottom:20px;">Insurance Coverage</h3>
-        <table style="width:100%; border-collapse: collapse; margin-bottom: 24px; text-align: left;">
+        <table style="width:100%; border-collapse: collapse; text-align: left;">
             <thead>
                 <tr style="border-bottom: 1px solid var(--card-border);">
                     <th style="padding: 8px 4px; color:var(--text-muted); font-weight:500;">Type</th>
@@ -453,13 +435,11 @@ def render_insurance_section(data: dict):
                 </tr>
             </tbody>
         </table>
-
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
 
 def render_authority_section(data: dict):
-    """Operating authority status section."""
     if not data:
         return
 
@@ -489,23 +469,11 @@ def render_authority_section(data: dict):
     st.markdown(html, unsafe_allow_html=True)
 
 def render_error_card(title: str, message: str, error_type: str = 'error'):
-    """Styled error/warning message."""
     cls = f"msg-{error_type}" if error_type in ['error', 'warning', 'info'] else 'msg-error'
-    
     html = f"""
     <div class="msg-card {cls}">
         <div class="msg-title">{title}</div>
         <div style="font-size: 0.9rem;">{message}</div>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
-
-def render_loading_animation(message: str = 'Fetching carrier data...'):
-    """Custom loading spinner."""
-    html = f"""
-    <div class="spinner-container">
-        <div class="lds-ellipsis"><div></div><div></div><div></div><div></div></div>
-        <div style="color: var(--text-muted); margin-top: 16px; font-weight: 500;">{message}</div>
     </div>
     """
     st.markdown(html, unsafe_allow_html=True)
