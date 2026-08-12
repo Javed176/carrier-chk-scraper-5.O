@@ -3,6 +3,7 @@ import sys
 import asyncio
 import time
 
+# Page config MUST be the first Streamlit command
 st.set_page_config(
     page_title='MC Carrier Intelligence',
     page_icon='🚛',
@@ -10,12 +11,14 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
+# Safe event loop policy configuration
 if sys.platform == 'win32':
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
 
+# Safe imports
 try:
     from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
     from scraper import scrape_carrier_profile
@@ -29,6 +32,7 @@ except Exception as import_err:
     st.error(f"Initialization Error: Failed to load required modules: {import_err}")
     st.stop()
 
+# Initialize Session State Variables
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 if 'is_auto_running' not in st.session_state:
@@ -43,7 +47,7 @@ def get_fmcsa_data(mc_number, api_key):
     return res
 
 @st.cache_data(ttl=3600, show_spinner=False)
-def get_carrier_profile(dot_number):
+def get_carrier_profile(dot_number, cache_version=1):
     return scrape_carrier_profile(dot_number)
 
 def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
@@ -55,7 +59,7 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
 
     comp = p.get('company', {})
 
-    # Legal name
+    # Legal name fallback (override scraper fallback like "Carrier DOT #...")
     current_name = comp.get('legal_name', '')
     fmcsa_name = f.get('legal_name', '')
     if (not current_name or current_name in ['N/A', 'Unknown', 'None'] or str(current_name).startswith('Carrier DOT #')) and fmcsa_name:
@@ -118,7 +122,7 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
     dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
 
     if dot_number:
-        raw_profile = get_carrier_profile(str(dot_number))
+        raw_profile = get_carrier_profile(str(dot_number), cache_version=2)  # bump version to invalidate old cache
     else:
         raw_profile = {}
 
@@ -232,6 +236,7 @@ def main():
                 st.session_state['current_auto_mc'] += 1
                 st.rerun()
 
+    # Display ONLY the master history table
     if st.session_state['history']:
         st.subheader("📊 Searched Carriers Master History")
         render_history_table(st.session_state['history'])
