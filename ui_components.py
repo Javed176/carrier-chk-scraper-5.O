@@ -230,9 +230,13 @@ def render_status_badge(status: str) -> str:
     if s in ['ACTIVE', 'AUTHORIZED', 'SATISFACTORY', 'Y']:
         cls = 'badge-active'
         s_text = 'AUTHORIZED' if s == 'Y' else s
-    elif s in ['INACTIVE', 'NOT AUTHORIZED', 'CONDITIONAL', 'N']:
-        cls = 'badge-inactive'
+    elif s in ['INACTIVE', 'NOT AUTHORIZED', 'N']:
+        # Red for inactive / not authorized
+        cls = 'badge-revoked'
         s_text = 'NOT AUTHORIZED' if s == 'N' else s
+    elif s in ['CONDITIONAL']:
+        cls = 'badge-inactive'
+        s_text = s
     elif s in ['REVOKED', 'UNSATISFACTORY']:
         cls = 'badge-revoked'
         s_text = s
@@ -246,7 +250,7 @@ def render_status_badge(status: str) -> str:
     return f'<span class="badge {cls}">{s_text}</span>'
 
 def render_history_table(history_list: list):
-    """Renders all searched carriers in a clean 3D glass data table."""
+    """Renders all searched carriers in a clean 3D glass data table with exactly 5 columns."""
     if not history_list:
         return
 
@@ -267,9 +271,7 @@ def render_history_table(history_list: list):
         if dba:
             name_display += f"<br/><span style='color:#94A3B8; font-size:0.8rem;'>DBA: {dba}</span>"
             
-        entity_type = comp.get('entity_type', 'CARRIER')
         status = comp.get('operating_status', 'UNKNOWN')
-        phone = contact.get('phone', 'N/A')
         email = contact.get('email', 'N/A')
         location = contact.get('physical_address', 'N/A')
 
@@ -279,9 +281,7 @@ def render_history_table(history_list: list):
         <tr>
             <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #A5B4FC;">{mc}</td>
             <td>{name_display}</td>
-            <td>{entity_type}</td>
             <td>{badge_html}</td>
-            <td>{phone}</td>
             <td>{email}</td>
             <td>{location}</td>
         </tr>
@@ -294,9 +294,7 @@ def render_history_table(history_list: list):
                 <tr>
                     <th>MC NUMBER</th>
                     <th>CARRIER / BROKER NAME</th>
-                    <th>ENTITY TYPE</th>
                     <th>OPERATING STATUS</th>
-                    <th>PHONE NUMBER</th>
                     <th>EMAIL ADDRESS</th>
                     <th>LOCATION</th>
                 </tr>
@@ -549,7 +547,6 @@ def render_fmcsa_summary(data: dict):
 
     Accepts either:
     - A flat dict as returned by fmcsa_client.resolve_mc_to_usdot()
-      (keys: dot_number, legal_name, dba_name, docket_number, physical_address, phone, status, etc.)
     - A merged profile dict that contains 'company' and 'contact' sub-dicts.
     """
     if not data:
