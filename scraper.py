@@ -55,41 +55,70 @@ def _safe_extract(soup: BeautifulSoup, selector: str, default: str = 'N/A') -> s
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
     """Attempts to find a label and extract the adjacent or sibling value."""
     try:
-        # Look for text containing label
         elements = soup.find_all(string=lambda text: text and label_text.lower() in text.lower())
         for element in elements:
             parent = element.parent
             if not parent:
                 continue
-                
-            # Check parent or parent's siblings
+
             if parent.name in ['th', 'td', 'dt', 'span', 'div', 'strong', 'b']:
                 sibling = parent.find_next_sibling()
                 if sibling:
                     val = sibling.get_text(strip=True)
                     if val:
                         return val
-                
+
                 # Check text after colon in same element
                 text = parent.get_text(strip=True)
                 if ':' in text:
                     parts = text.split(':', 1)
                     if len(parts) > 1 and parts[1].strip():
                         return parts[1].strip()
-                        
-                # Check parent's parent sibling
+
                 if parent.parent:
                     parent_sibling = parent.parent.find_next_sibling()
                     if parent_sibling:
                         val = parent_sibling.get_text(strip=True)
                         if val:
                             return val
+
+            # Special case: label inside anchor or link
+            if parent.name == 'a':
+                href = parent.get('href', '')
+                if href.startswith('mailto:'):
+                    return href.replace('mailto:', '').strip()
+                if href.startswith('tel:'):
+                    return href.replace('tel:', '').strip()
     except Exception:
         pass
     return default
 
+def _extract_email_from_links(soup: BeautifulSoup) -> str:
+    """Try to find any mailto link in the page."""
+    try:
+        mail_link = soup.find('a', href=lambda h: h and h.startswith('mailto:'))
+        if mail_link:
+            return mail_link['href'].replace('mailto:', '').strip()
+    except Exception:
+        pass
+    return 'N/A'
+
+def _extract_phone_from_links(soup: BeautifulSoup) -> str:
+    """Try to find any tel link in the page."""
+    try:
+        tel_link = soup.find('a', href=lambda h: h and h.startswith('tel:'))
+        if tel_link:
+            return tel_link['href'].replace('tel:', '').strip()
+    except Exception:
+        pass
+    return 'N/A'
+
 def _extract_profile_data(soup: BeautifulSoup) -> dict:
     """Extracts structured profile data from BeautifulSoup object."""
+    # Attempt direct mailto/tel extraction first
+    email = _extract_email_from_links(soup)
+    phone = _extract_phone_from_links(soup)
+
     data = {
         'company': {
             'legal_name': _extract_by_label(soup, 'Legal Name'),
@@ -99,17 +128,18 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
             'operating_status': _extract_by_label(soup, 'Operating Status'),
             'entity_type': _extract_by_label(soup, 'Entity Type'),
             'operation_classification': _extract_by_label(soup, 'Operation Classification'),
+            'owner_name': _extract_by_label(soup, 'Owner', default=_extract_by_label(soup, 'Owner Name', default='')),
         },
         'contact': {
             'physical_address': _extract_by_label(soup, 'Physical Address'),
             'mailing_address': _extract_by_label(soup, 'Mailing Address'),
-            'phone': _extract_by_label(soup, 'Phone'),
-            'email': _extract_by_label(soup, 'Email'),
+            'phone': phone if phone != 'N/A' else _extract_by_label(soup, 'Phone'),
+            'email': email if email != 'N/A' else _extract_by_label(soup, 'Email'),
         },
         'fleet': {
             'power_units': _extract_by_label(soup, 'Power Units'),
             'drivers': _extract_by_label(soup, 'Drivers'),
-            'cargo_types': [], 
+            'cargo_types': [],
         },
         'safety': {
             'safety_rating': _extract_by_label(soup, 'Safety Rating'),
@@ -134,7 +164,8 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
             'broker_authority': _extract_by_label(soup, 'Broker Authority'),
         },
     }
-    
+
+    # Cargo extraction
     try:
         cargo_section = soup.find(string=lambda text: text and 'Cargo' in text and 'Carried' in text)
         if cargo_section and cargo_section.parent:
@@ -142,10 +173,7 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
             if container:
                 items = container.find_all('li')
                 cargo_types = [item.get_text(strip=True) for item in items if item.get_text(strip=True) and len(item.get_text(strip=True)) > 2]
-                if cargo_types:
-                    data['fleet']['cargo_types'] = cargo_types
-                else:
-                    data['fleet']['cargo_types'] = ['General Freight']
+                data['fleet']['cargo_types'] = cargo_types if cargo_types else ['General Freight']
     except Exception as e:
         logger.warning(f"Failed to extract cargo types: {e}")
         data['fleet']['cargo_types'] = ['General Freight']
@@ -163,15 +191,15 @@ def scrape_carrier_profile(dot_number: int) -> dict:
         }
 
     install_playwright_browsers()
-    
+
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
                 headless=True,
                 args=[
-                    '--no-sandbox', 
-                    '--disable-dev-shm-usage', 
-                    '--disable-gpu', 
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
                     '--disable-setuid-sandbox'
                 ]
             )
@@ -181,22 +209,19 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             page = context.new_page()
             url = f"https://dotsearch.io/dot/{dot_number}"
             logger.info(f"Navigating to {url}")
-            
+
             try:
                 page.goto(url, timeout=30000)
-                # Wait for network to be idle (increased timeout)
                 page.wait_for_load_state('networkidle', timeout=20000)
-                # Additional wait for dynamic content
-                page.wait_for_timeout(5000)  # 5 seconds
+                page.wait_for_timeout(5000)
             except Exception as nav_e:
                 logger.warning(f"Page load timeout/warning: {nav_e}")
-            
-            # Try to wait for a common element that indicates data loaded
+
             try:
                 page.wait_for_selector('div.card, div[class*="card"], h1', timeout=10000)
             except Exception:
                 pass
-            
+
             html_content = page.content()
             context.close()
             browser.close()
