@@ -2,9 +2,20 @@ import streamlit as st
 import pandas as pd
 from playwright.sync_api import sync_playwright
 import time
+import os
+import subprocess
+
+# Ensure Playwright Chromium browser is installed on Streamlit Cloud
+@st.cache_resource
+def install_playwright_browsers():
+    try:
+        subprocess.run(["playwright", "install", "chromium"], check=True)
+    except Exception as e:
+        st.error(f"Failed to install Playwright browser: {e}")
+
+install_playwright_browsers()
 
 st.set_page_config(page_title="DOT Search Scraper", layout="wide")
-
 st.title("Background DOT / Broker Search")
 
 # Input Controls
@@ -18,27 +29,22 @@ def scrape_dotsearch(query, max_items):
     data = []
     
     with sync_playwright() as p:
-        # Launch Chromium strictly in background (headless=True)
+        # Launch Chromium headless
         browser = p.chromium.launch(
             headless=True,
             args=["--no-sandbox", "--disable-setuid-sandbox"]
         )
         page = browser.new_page()
         
-        # Navigate to dotsearch.io
         page.goto("https://www.dotsearch.io/", wait_until="domcontentloaded")
         
-        # Locate search bar and input query
         search_input = page.wait_for_selector('input[type="text"], input[type="search"]')
         if search_input:
             search_input.fill(query)
             search_input.press("Enter")
         
-        # Wait for the results table or cards to load dynamically
-        time.sleep(3)  # Brief pause for background XHR responses to populate
+        time.sleep(3)
         
-        # Extract rows from table or search result elements
-        # Note: Selectors target the table/list structure of dotsearch.io
         rows = page.query_selector_all("table tbody tr")
         
         for row in rows[:max_items]:
@@ -65,18 +71,8 @@ if st.button("Run Background Search") and search_query:
             
             if not df.empty:
                 st.success(f"Successfully scraped {len(df)} records!")
-                # Display identical layout as requested
                 st.dataframe(df, use_container_width=True)
-                
-                # Download option
-                csv = df.to_csv(index=False).encode('utf-8')
-                st.download_button(
-                    label="Download CSV",
-                    data=csv,
-                    file_name="dot_search_results.csv",
-                    mime="text/csv"
-                )
             else:
-                st.warning("No data found or target element selectors need adjustment.")
+                st.warning("No data found.")
         except Exception as e:
             st.error(f"Execution Error: {e}")
