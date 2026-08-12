@@ -62,29 +62,52 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
     p = profile_data or {}
     f = fmcsa_data or {}
     
-    p['searched_mc'] = f.get('searched_mc', '')
+    p['searched_mc'] = f.get('searched_mc', p.get('searched_mc', ''))
 
     comp = p.get('company', {})
-    if comp.get('legal_name', 'N/A') in ['N/A', 'Unknown', '']:
-        comp['legal_name'] = f.get('legal_name', 'Unknown Carrier')
-    if comp.get('dba_name', 'N/A') in ['N/A', '']:
-        comp['dba_name'] = f.get('dba_name', '')
-    if comp.get('dot_number', 'N/A') in ['N/A', '']:
-        comp['dot_number'] = str(f.get('dot_number', 'N/A'))
-        
-    mc_val = f.get('docket_number') or f.get('searched_mc') or 'N/A'
-    if comp.get('mc_number', 'N/A') in ['N/A', '', 'None']:
+    # Legal name fallback (override scraper fallback like "Carrier DOT #...")
+    current_name = comp.get('legal_name', '')
+    fmcsa_name = f.get('legal_name', '')
+    if (not current_name or current_name in ['N/A', 'Unknown', 'None'] or str(current_name).startswith('Carrier DOT #')) and fmcsa_name:
+        comp['legal_name'] = fmcsa_name
+
+    # DBA name
+    current_dba = comp.get('dba_name', '')
+    fmcsa_dba = f.get('dba_name', '')
+    if not current_dba and fmcsa_dba:
+        comp['dba_name'] = fmcsa_dba
+
+    # DOT number
+    if not comp.get('dot_number') or comp.get('dot_number') in ['N/A', '']:
+        comp['dot_number'] = str(f.get('dot_number', comp.get('dot_number', 'N/A')))
+
+    # MC number
+    mc_val = f.get('docket_number') or f.get('searched_mc') or comp.get('mc_number', 'N/A')
+    if not comp.get('mc_number') or comp.get('mc_number') in ['N/A', 'None', '']:
         comp['mc_number'] = str(mc_val)
-        
-    if comp.get('operating_status', 'N/A') in ['N/A', 'Unknown', '']:
-        comp['operating_status'] = f.get('status', 'Unknown')
+
+    # Operating status
+    current_status = comp.get('operating_status', '')
+    fmcsa_status = f.get('status', '')
+    if (not current_status or current_status in ['N/A', 'Unknown', 'None']) and fmcsa_status:
+        comp['operating_status'] = fmcsa_status
+
+    # Entity type and operation classification from FMCSA if missing
+    if not comp.get('entity_type') or comp.get('entity_type') in ['N/A', 'Unknown', 'None']:
+        comp['entity_type'] = f.get('entity_type', comp.get('entity_type', 'Unknown'))
+    if not comp.get('operation_classification') or comp.get('operation_classification') in ['N/A', 'Unknown', 'None']:
+        comp['operation_classification'] = f.get('operation_classification', comp.get('operation_classification', 'Unknown'))
+
     p['company'] = comp
 
     contact = p.get('contact', {})
-    if contact.get('physical_address', 'N/A') in ['N/A', '']:
-        contact['physical_address'] = f.get('physical_address', 'N/A')
-    if contact.get('phone', 'N/A') in ['N/A', '']:
-        contact['phone'] = f.get('phone', 'N/A')
+    if not contact.get('physical_address') or contact.get('physical_address') in ['N/A', '']:
+        contact['physical_address'] = f.get('physical_address', contact.get('physical_address', 'N/A'))
+    if not contact.get('phone') or contact.get('phone') in ['N/A', '']:
+        contact['phone'] = f.get('phone', contact.get('phone', 'N/A'))
+    # Email may not be in FMCSA, but keep existing if any
+    if not contact.get('email'):
+        contact['email'] = f.get('email', contact.get('email', 'N/A'))
     p['contact'] = contact
 
     return p
