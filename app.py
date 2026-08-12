@@ -7,61 +7,63 @@ st.title("MC / DOT Background Search")
 
 query_input = st.text_input("Enter MC or DOT Number:", placeholder="e.g. 1800000 or 4535979")
 
-def fetch_dotsearch_api(search_term):
+def fetch_fmcsa_carrier_data(search_term):
     clean_term = str(search_term).strip().replace("MC", "").replace("mc", "").strip()
     
-    # Target dotsearch.io backend search endpoint directly
-    url = f"https://www.dotsearch.io/api/search?q={clean_term}"
+    # Official FMCSA Public API Endpoint (Query by MC Number)
+    url = f"https://mobile.fmcsa.dot.gov/qc/services/carriers/mc/{clean_term}?webKey=4f03930b80baedfb65a1e78eb3dd9db3d4dca889"
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.dotsearch.io/"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+        "Accept": "application/json"
     }
     
     response = requests.get(url, headers=headers, timeout=10)
     
     if response.status_code == 200:
-        results = response.json()
+        json_data = response.json()
+        content = json_data.get("content", {})
+        carrier = content.get("carrier", {}) if content else {}
         
-        # Handle single dictionary or list of results
-        if isinstance(results, dict):
-            results = results.get("data", [results]) if "data" in results else [results]
+        if carrier:
+            mc_num = f"MC {clean_term}"
+            name = carrier.get("legalName") or carrier.get("dbaName") or "N/A"
             
-        parsed_data = []
-        for item in results:
-            # Extract fields directly from backend JSON response
-            mc_num = item.get("mc_number") or item.get("mcNumber") or f"MC {clean_term}"
-            name = item.get("legal_name") or item.get("dba_name") or item.get("name") or "N/A"
-            entity = item.get("entity_type") or item.get("entityType") or "Broker"
-            status = item.get("operating_status") or item.get("status") or "AUTHORIZED"
-            phone = item.get("phone") or item.get("telephone") or "N/A"
-            email = item.get("email") or "N/A"
+            # Determine operating authority / entity type
+            allowed = carrier.get("allowedToOperate")
+            operating_status = "AUTHORIZED" if allowed == "Y" else ("NOT AUTHORIZED" if allowed == "N" else "INACTIVE")
             
-            city = item.get("city") or item.get("phyCity") or ""
-            state = item.get("state") or item.get("phyState") or ""
+            phone = carrier.get("telephone") or "N/A"
+            email = carrier.get("emailAddress") or "N/A"
+            
+            city = carrier.get("phyCity") or ""
+            state = carrier.get("phyState") or ""
             location = f"{city}, {state}".strip(", ") if (city or state) else "N/A"
             
-            parsed_data.append({
+            # Entity classification
+            entity_type = "Carrier"
+            if carrier.get("brokerAuthorityStatus") == "A":
+                entity_type = "Broker"
+            elif carrier.get("commonAuthorityStatus") == "A":
+                entity_type = "Carrier"
+                
+            return pd.DataFrame([{
                 "MC NUMBER": mc_num,
                 "BROKER NAME": name,
-                "ENTITY TYPE": entity,
-                "OPERATING STATUS": status,
+                "ENTITY TYPE": entity_type,
+                "OPERATING STATUS": operating_status,
                 "PHONE NUMBER": phone,
                 "EMAIL ADDRESS": email,
                 "LOCATION": location,
-            })
+            }])
             
-        return pd.DataFrame(parsed_data)
-    else:
-        st.error(f"API Error {response.status_code}")
-        return pd.DataFrame()
+    return pd.DataFrame()
 
 if st.button("Search") and query_input:
-    with st.spinner("Querying dotsearch backend..."):
-        df = fetch_dotsearch_api(query_input)
-        if not df.empty and df["BROKER NAME"].iloc[0] != "N/A":
-            st.success("Successfully fetched company profile!")
+    with st.spinner("Fetching official FMCSA carrier records..."):
+        df = fetch_fmcsa_carrier_data(query_input)
+        if not df.empty:
+            st.success("Successfully fetched carrier profile!")
             st.dataframe(df, use_container_width=True)
         else:
-            st.warning("No valid records returned for this number.")
+            st.warning("No records found for this MC/DOT number.")
