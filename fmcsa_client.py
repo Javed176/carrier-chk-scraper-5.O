@@ -14,19 +14,15 @@ FMCSA_BASE_URL = 'https://mobile.fmcsa.dot.gov/qc/services'
 TIMEOUT_SECONDS = 15
 
 class FMCSAError(Exception):
-    """Base exception for FMCSA client errors."""
     pass
 
 class FMCSAAuthError(FMCSAError):
-    """Raised when authentication fails (e.g., invalid webKey)."""
     pass
 
 class FMCSANotFoundError(FMCSAError):
-    """Raised when the requested carrier or docket number is not found."""
     pass
 
 def _get_value(carrier: Dict[str, Any], *keys: str, default: str = "") -> str:
-    """Safely retrieve first non-empty value from a list of possible keys."""
     for key in keys:
         val = carrier.get(key)
         if val is not None and str(val).strip() not in ['', 'None', 'N/A']:
@@ -34,9 +30,6 @@ def _get_value(carrier: Dict[str, Any], *keys: str, default: str = "") -> str:
     return default
 
 def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Parse and format the carrier data from the FMCSA response.
-    """
     content = data.get("content", {})
     if isinstance(content, list) and len(content) > 0:
         carrier = content[0].get("carrier", {})
@@ -45,7 +38,6 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         carrier = {}
 
-    # Physical address
     phy_street = _get_value(carrier, "phyStreet", "physicalStreet", "street", default="")
     phy_city = _get_value(carrier, "phyCity", "physicalCity", "city", default="")
     phy_state = _get_value(carrier, "phyState", "physicalState", "state", default="")
@@ -54,7 +46,6 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     address_parts = [p for p in [phy_street, phy_city, phy_state, phy_zip] if p]
     physical_address = ", ".join(address_parts) if address_parts else "N/A"
 
-    # Operating status
     allowed = _get_value(carrier, "allowedToOperate", "allowed_to_operate", default="")
     oos = _get_value(carrier, "outOfService", "out_of_service", default="")
     status = "Unknown"
@@ -76,8 +67,6 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
         "operationClass",
         default=""
     ).upper()
-
-    # If entity type still empty, try to infer from authority fields
     if not entity_type:
         broker_auth = _get_value(carrier, "brokerAuthorityStatus", "broker_authority", default="")
         common_auth = _get_value(carrier, "commonAuthorityStatus", "common_authority", default="")
@@ -89,13 +78,24 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     # Phone
     phone = _get_value(carrier, "phyPhone", "phone", "telephone", "contactPhone", "phoneNumber", default="N/A")
 
-    # Owner name (try multiple possible keys)
-    owner_name = _get_value(carrier, "ownerName", "owner_name", "principalName", "contactName", "contact_name", default="")
+    # Owner / officer names
+    owner_name = _get_value(
+        carrier,
+        "ownerName", "owner_name",
+        "principalName", "contactName", "contact_name",
+        "officer1Name", "officer1_name", "officerName",
+        default=""
+    )
+    if not owner_name:
+        # Try nested officers list
+        officers = carrier.get("officers", [])
+        if isinstance(officers, list) and officers:
+            first_officer = officers[0]
+            if isinstance(first_officer, dict):
+                owner_name = _get_value(first_officer, "name", "fullName", default="")
 
-    # Email (usually not present, but try)
     email = _get_value(carrier, "email", "emailAddress", "contactEmail", default="")
 
-    # Power units and drivers
     power_units = _get_value(carrier, "powerUnits", "power_units", default="0")
     drivers = _get_value(carrier, "drivers", "driverCount", default="0")
 
