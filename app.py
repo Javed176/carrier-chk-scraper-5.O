@@ -3,7 +3,6 @@ import sys
 import asyncio
 import time
 
-# Page config MUST be the first Streamlit command
 st.set_page_config(
     page_title='MC Carrier Intelligence',
     page_icon='🚛',
@@ -11,14 +10,12 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
-# Safe event loop policy configuration
 if sys.platform == 'win32':
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
 
-# Safe imports
 try:
     from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
     from scraper import scrape_carrier_profile
@@ -32,7 +29,6 @@ except Exception as import_err:
     st.error(f"Initialization Error: Failed to load required modules: {import_err}")
     st.stop()
 
-# Initialize Session State Variables
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 if 'is_auto_running' not in st.session_state:
@@ -54,21 +50,20 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
     """Merges FMCSA primary response into profile data as fallbacks for any missing fields."""
     p = profile_data or {}
     f = fmcsa_data or {}
-    
+
     p['searched_mc'] = f.get('searched_mc', p.get('searched_mc', ''))
 
     comp = p.get('company', {})
-    # Legal name fallback (override scraper fallback like "Carrier DOT #...")
+
+    # Legal name
     current_name = comp.get('legal_name', '')
     fmcsa_name = f.get('legal_name', '')
     if (not current_name or current_name in ['N/A', 'Unknown', 'None'] or str(current_name).startswith('Carrier DOT #')) and fmcsa_name:
         comp['legal_name'] = fmcsa_name
 
     # DBA name
-    current_dba = comp.get('dba_name', '')
-    fmcsa_dba = f.get('dba_name', '')
-    if not current_dba and fmcsa_dba:
-        comp['dba_name'] = fmcsa_dba
+    if not comp.get('dba_name') and f.get('dba_name'):
+        comp['dba_name'] = f.get('dba_name')
 
     # DOT number
     if not comp.get('dot_number') or comp.get('dot_number') in ['N/A', '']:
@@ -85,20 +80,29 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
     if (not current_status or current_status in ['N/A', 'Unknown', 'None']) and fmcsa_status:
         comp['operating_status'] = fmcsa_status
 
-    # Entity type and operation classification from FMCSA if missing
-    if not comp.get('entity_type') or comp.get('entity_type') in ['N/A', 'Unknown', 'None']:
-        comp['entity_type'] = f.get('entity_type', comp.get('entity_type', 'Unknown'))
-    if not comp.get('operation_classification') or comp.get('operation_classification') in ['N/A', 'Unknown', 'None']:
-        comp['operation_classification'] = f.get('operation_classification', comp.get('operation_classification', 'Unknown'))
+    # Entity type
+    current_entity = comp.get('entity_type', '')
+    fmcsa_entity = f.get('entity_type', '')
+    if (not current_entity or current_entity in ['N/A', 'Unknown', 'None', '']):
+        if fmcsa_entity and fmcsa_entity != 'Unknown':
+            comp['entity_type'] = fmcsa_entity
+        else:
+            comp['entity_type'] = current_entity if current_entity else 'Unknown'
+
+    # Owner name
+    current_owner = comp.get('owner_name', '')
+    fmcsa_owner = f.get('owner_name', '')
+    if (not current_owner or current_owner in ['N/A', 'None', '']) and fmcsa_owner:
+        comp['owner_name'] = fmcsa_owner
 
     p['company'] = comp
 
     contact = p.get('contact', {})
-    if not contact.get('physical_address') or contact.get('physical_address') in ['N/A', '']:
+    if not contact.get('physical_address') or contact.get('physical_address') in ['N/A', '', 'None']:
         contact['physical_address'] = f.get('physical_address', contact.get('physical_address', 'N/A'))
-    if not contact.get('phone') or contact.get('phone') in ['N/A', '']:
+    if not contact.get('phone') or contact.get('phone') in ['N/A', '', 'None']:
         contact['phone'] = f.get('phone', contact.get('phone', 'N/A'))
-    if not contact.get('email'):
+    if not contact.get('email') or contact.get('email') in ['N/A', '', 'None']:
         contact['email'] = f.get('email', contact.get('email', 'N/A'))
     p['contact'] = contact
 
@@ -109,76 +113,70 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
     mc_clean = mc_str.strip()
     if not mc_clean:
         return None
-        
+
     fmcsa_data = get_fmcsa_data(mc_clean, api_key)
     dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
-    
+
     if dot_number:
         raw_profile = get_carrier_profile(str(dot_number))
     else:
         raw_profile = {}
-        
+
     profile = merge_fmcsa_and_profile(fmcsa_data, raw_profile)
-    
-    # Check if already in history to avoid duplicates
+
     existing_mcs = [item.get('searched_mc') for item in st.session_state['history']]
     if mc_clean not in existing_mcs:
         st.session_state['history'].append(profile)
-        
+
     return profile
 
 def main():
     inject_custom_css()
     render_header()
-    
-    # Safe retrieval of secrets
+
     default_webkey = ""
     try:
         if hasattr(st, "secrets") and "FMCSA_WEB_KEY" in st.secrets:
             default_webkey = st.secrets["FMCSA_WEB_KEY"]
     except Exception:
         default_webkey = ""
-    
-    # Clean Sidebar (Configuration Only)
+
     st.sidebar.title('🚛 MC Carrier Lookup')
     st.sidebar.divider()
-    
     st.sidebar.subheader('Configuration')
     api_key = st.sidebar.text_input(
-        'FMCSA WebKey', 
-        type='password', 
-        value=default_webkey, 
+        'FMCSA WebKey',
+        type='password',
+        value=default_webkey,
         help='Get your free key at mobile.fmcsa.dot.gov'
     )
     st.sidebar.divider()
 
-    # Controls Section (Single & Auto-Increment Batch Mode)
     col_input, col_single, col_auto, col_stop, col_clear = st.columns([2.5, 1.2, 1.4, 1, 1.2])
-    
+
     with col_input:
         mc_input = st.text_input('Enter Starting MC Number', placeholder='e.g., 1066434')
-        
+
     with col_single:
         st.write("")
         st.write("")
         single_btn = st.button('🔍 Lookup', use_container_width=True)
-        
+
     with col_auto:
         st.write("")
         st.write("")
         auto_start_btn = st.button('▶ Start Auto', type='primary', use_container_width=True)
-        
+
     with col_stop:
         st.write("")
         st.write("")
         stop_btn = st.button('🛑 Stop', type='secondary', use_container_width=True)
-        
+
     with col_clear:
         st.write("")
         st.write("")
         clear_btn = st.button('🗑️ Clear History', use_container_width=True)
 
-    # Button Action Handlers
     if stop_btn:
         st.session_state['is_auto_running'] = False
         st.toast("🛑 Auto-increment lookup stopped.")
@@ -196,7 +194,7 @@ def main():
         if not mc_input:
             st.warning("Please enter a starting MC Number.")
             return
-            
+
         try:
             import re
             cleaned_start = re.sub(r'\D', '', mc_input)
@@ -221,7 +219,6 @@ def main():
         except Exception as e:
             render_error_card('Lookup Error', str(e))
 
-    # Auto-Increment Execution Loop
     if st.session_state.get('is_auto_running', False):
         curr_mc = st.session_state['current_auto_mc']
         with st.spinner(f"🔄 Auto-Processing MC {curr_mc}... (Click 🛑 Stop to halt)"):
@@ -235,7 +232,6 @@ def main():
                 st.session_state['current_auto_mc'] += 1
                 st.rerun()
 
-    # Display ONLY the master history table
     if st.session_state['history']:
         st.subheader("📊 Searched Carriers Master History")
         render_history_table(st.session_state['history'])
