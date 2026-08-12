@@ -6,10 +6,11 @@ import os
 import requests
 from bs4 import BeautifulSoup
 import subprocess
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-# Apply nest_asyncio safely (for compatibility)
+# Apply nest_asyncio safely
 try:
     import nest_asyncio
     nest_asyncio.apply()
@@ -35,9 +36,13 @@ HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
+PROXY_URLS = [
+    "https://api.allorigins.win/raw?url={}",
+    "https://corsproxy.io/?url={}",
+]
+
 def _install_playwright_if_needed():
     """Check if Playwright browser exists; if not, install it."""
-    # Check for chromium in default cache path
     cache_dir = os.path.expanduser("~/.cache/ms-playwright")
     if os.path.exists(cache_dir):
         for name in os.listdir(cache_dir):
@@ -46,7 +51,6 @@ def _install_playwright_if_needed():
                 if os.path.exists(chrome_path):
                     logger.info("Chromium browser already installed.")
                     return True
-    # Install chromium
     try:
         logger.info("Installing Playwright Chromium...")
         res = subprocess.run(
@@ -66,28 +70,23 @@ def _install_playwright_if_needed():
         return False
 
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
-    """Generic label-value extractor using BeautifulSoup."""
     try:
         for elem in soup.find_all(string=re.compile(re.escape(label_text), re.IGNORECASE)):
             parent = elem.parent
             if not parent:
                 continue
-
             sibling = parent.find_next_sibling()
             if sibling and sibling.get_text(strip=True):
                 return sibling.get_text(strip=True)
-
             text = parent.get_text(strip=True)
             if ':' in text:
                 parts = text.split(':', 1)
                 if len(parts) > 1 and parts[1].strip():
                     return parts[1].strip()
-
             if parent.parent:
                 parent_sibling = parent.parent.find_next_sibling()
                 if parent_sibling and parent_sibling.get_text(strip=True):
                     return parent_sibling.get_text(strip=True)
-
             if parent.name in ['th', 'td']:
                 next_td = parent.find_next('td')
                 if next_td and next_td.get_text(strip=True):
@@ -137,17 +136,14 @@ def _extract_owner_name(soup: BeautifulSoup) -> str:
                 sibling = parent.find_next_sibling()
                 if sibling and sibling.get_text(strip=True):
                     return sibling.get_text(strip=True)
-
                 if parent.parent:
                     parent_sibling = parent.parent.find_next_sibling()
                     if parent_sibling and parent_sibling.get_text(strip=True):
                         return parent_sibling.get_text(strip=True)
-
                 if parent.name in ['th', 'td']:
                     next_td = parent.find_next('td')
                     if next_td and next_td.get_text(strip=True):
                         return next_td.get_text(strip=True)
-
                 text = parent.get_text(separator='\n')
                 lines = text.split('\n')
                 for i, line in enumerate(lines):
@@ -168,11 +164,9 @@ def _extract_entity_type(soup: BeautifulSoup) -> str:
                 return text
     except Exception:
         pass
-
     val = _extract_by_label(soup, 'Entity Type', default='')
     if val and val.lower() not in ['n/a', 'unknown', '']:
         return val
-
     return 'Unknown'
 
 def _parse_html(html_content: str) -> dict:
@@ -219,36 +213,64 @@ def _parse_html(html_content: str) -> dict:
         'safety': {},
         'insurance': {},
         'authority': {},
-        'source': 'playwright',
+        'source': 'requests',
     }
 
 def scrape_with_requests(dot_number: int) -> dict:
+    """Try direct requests first."""
     url = f"https://dotsearch.io/dot/{dot_number}"
-    logger.info(f"Attempting requests scrape for {url}")
+    logger.info(f"Attempting direct requests scrape for {url}")
     try:
-        session = requests.Session()
-        response = session.get(url, headers=HEADERS, timeout=20)
+        response = requests.get(url, headers=HEADERS, timeout=20)
         if response.status_code == 200:
             data = _parse_html(response.text)
             if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
                 data['company']['dot_number'] = str(dot_number)
-                data['source'] = 'requests'
+                data['source'] = 'direct'
                 return data
             else:
-                logger.warning("Requests scrape returned no email/phone, likely JS-rendered")
+                logger.warning("Direct requests returned no email/phone")
         else:
-            logger.warning(f"Requests scrape HTTP {response.status_code}")
+            logger.warning(f"Direct requests HTTP {response.status_code}")
     except Exception as e:
-        logger.warning(f"Requests scrape failed: {e}")
+        logger.warning(f"Direct requests failed: {e}")
+    return None
+
+def scrape_with_proxy(dot_number: int) -> dict:
+    """Try CORS proxies to bypass IP restrictions."""
+    url = f"https://dotsearch.io/dot/{dot_number}"
+    encoded_url = quote(url, safe='')
+    for proxy_template in PROXY_URLS:
+        proxy_url = proxy_template.format(encoded_url)
+        logger.info(f"Attempting proxy scrape via {proxy_url}")
+        try:
+            response = requests.get(proxy_url, headers=HEADERS, timeout=30)
+            if response.status_code == 200:
+                data = _parse_html(response.text)
+                if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
+                    data['company']['dot_number'] = str(dot_number)
+                    data['source'] = f'proxy_{proxy_template.split(".")[0]}'
+                    return data
+                else:
+                    logger.warning(f"Proxy returned no email/phone: {proxy_template}")
+            else:
+                logger.warning(f"Proxy HTTP {response.status_code}: {proxy_template}")
+        except Exception as e:
+            logger.warning(f"Proxy failed: {proxy_template}: {e}")
     return None
 
 def scrape_carrier_profile(dot_number: int) -> dict:
-    # Try requests first (faster, may work for some carriers)
+    # Try direct requests
     result = scrape_with_requests(dot_number)
     if result:
         return result
 
-    # Now try Playwright
+    # Try proxies
+    result = scrape_with_proxy(dot_number)
+    if result:
+        return result
+
+    # Fallback to Playwright (requires dependencies)
     logger.info("Falling back to Playwright")
     if not _install_playwright_if_needed():
         return {
