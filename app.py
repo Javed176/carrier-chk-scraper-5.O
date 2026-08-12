@@ -3,7 +3,7 @@ import sys
 import asyncio
 import time
 
-DEBUG = False  # Set to True to see debug output
+DEBUG = True  # Set to False to hide debug output later
 
 st.set_page_config(
     page_title='MC Carrier Intelligence',
@@ -109,7 +109,7 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
     dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
 
     if dot_number:
-        raw_profile = get_carrier_profile(str(dot_number), cache_version=5)  # bumped to invalidate cache
+        raw_profile = get_carrier_profile(str(dot_number), cache_version=6)  # bump version to invalidate cache
     else:
         raw_profile = {}
 
