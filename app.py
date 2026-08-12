@@ -3,7 +3,7 @@ import sys
 import asyncio
 import time
 
-DEBUG = True  # Set to False to hide debug output later
+DEBUG = True
 
 st.set_page_config(
     page_title='MC Carrier Intelligence',
@@ -19,7 +19,7 @@ if sys.platform == 'win32':
         pass
 
 try:
-    from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
+    from fmcsa_client import resolve_mc_to_usdot, get_carrier_by_dot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
     from scraper import scrape_carrier_profile
     from ui_components import (
         inject_custom_css,
@@ -43,6 +43,10 @@ def get_fmcsa_data(mc_number, api_key):
     res = resolve_mc_to_usdot(mc_number, api_key)
     res['searched_mc'] = mc_number
     return res
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_fmcsa_by_dot(dot_number, api_key):
+    return get_carrier_by_dot(dot_number, api_key)
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_carrier_profile(dot_number, cache_version=1):
@@ -105,21 +109,34 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
     if not mc_clean:
         return None
 
+    # 1. Resolve MC to DOT
     fmcsa_data = get_fmcsa_data(mc_clean, api_key)
-    dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
+    dot_number = fmcsa_data.get('dot_number')
 
+    # 2. Fetch full carrier details by DOT (often has phone/owner)
+    fmcsa_detail = {}
     if dot_number:
-        raw_profile = get_carrier_profile(str(dot_number), cache_version=6)  # bump version to invalidate cache
-    else:
-        raw_profile = {}
+        try:
+            fmcsa_detail = get_fmcsa_by_dot(str(dot_number), api_key)
+        except Exception:
+            fmcsa_detail = {}
 
-    profile = merge_fmcsa_and_profile(fmcsa_data, raw_profile)
+    # 3. Scrape dotsearch (optional)
+    raw_profile = {}
+    if dot_number:
+        raw_profile = get_carrier_profile(str(dot_number), cache_version=8)
+
+    # 4. Merge all data (priority: FMCSA detail > FMCSA basic > scraper)
+    combined_fmcsa = {**fmcsa_data, **fmcsa_detail}
+    profile = merge_fmcsa_and_profile(combined_fmcsa, raw_profile)
+    profile['searched_mc'] = mc_clean
 
     if DEBUG:
         with st.expander(f"Debug for MC {mc_clean}", expanded=False):
-            st.write("**FMCSA Data:**", fmcsa_data)
-            st.write("**Raw Profile from Scraper:**", raw_profile)
-            st.write("**Merged Profile:**", profile)
+            st.write("**FMCSA basic (docket):**", fmcsa_data)
+            st.write("**FMCSA detail (DOT):**", fmcsa_detail)
+            st.write("**Raw scraper profile:**", raw_profile)
+            st.write("**Merged profile:**", profile)
 
     existing_mcs = [item.get('searched_mc') for item in st.session_state['history']]
     if mc_clean not in existing_mcs:
