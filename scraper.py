@@ -2,8 +2,10 @@ import sys
 import asyncio
 import logging
 import re
+import os
 import requests
 from bs4 import BeautifulSoup
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -17,8 +19,8 @@ except Exception as e:
 if sys.platform == 'win32':
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-    except Exception as e:
-        logger.warning(f"Event loop policy warning: {e}")
+    except Exception:
+        pass
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -33,6 +35,36 @@ HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
+def _install_playwright_if_needed():
+    """Check if Playwright browser exists; if not, install it."""
+    # Check for chromium in default cache path
+    cache_dir = os.path.expanduser("~/.cache/ms-playwright")
+    if os.path.exists(cache_dir):
+        for name in os.listdir(cache_dir):
+            if name.startswith("chromium-"):
+                chrome_path = os.path.join(cache_dir, name, "chrome-linux", "chrome")
+                if os.path.exists(chrome_path):
+                    logger.info("Chromium browser already installed.")
+                    return True
+    # Install chromium
+    try:
+        logger.info("Installing Playwright Chromium...")
+        res = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=False,
+            capture_output=True,
+            text=True
+        )
+        if res.returncode == 0:
+            logger.info("Playwright Chromium installed successfully.")
+            return True
+        else:
+            logger.warning(f"Playwright install failed: {res.stderr}")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not run playwright install: {e}")
+        return False
+
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
     """Generic label-value extractor using BeautifulSoup."""
     try:
@@ -41,25 +73,21 @@ def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A'
             if not parent:
                 continue
 
-            # Case 1: sibling
             sibling = parent.find_next_sibling()
             if sibling and sibling.get_text(strip=True):
                 return sibling.get_text(strip=True)
 
-            # Case 2: colon separated
             text = parent.get_text(strip=True)
             if ':' in text:
                 parts = text.split(':', 1)
                 if len(parts) > 1 and parts[1].strip():
                     return parts[1].strip()
 
-            # Case 3: parent's sibling
             if parent.parent:
                 parent_sibling = parent.parent.find_next_sibling()
                 if parent_sibling and parent_sibling.get_text(strip=True):
                     return parent_sibling.get_text(strip=True)
 
-            # Case 4: table cell
             if parent.name in ['th', 'td']:
                 next_td = parent.find_next('td')
                 if next_td and next_td.get_text(strip=True):
@@ -69,7 +97,6 @@ def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A'
     return default
 
 def _extract_email(soup: BeautifulSoup) -> str:
-    """Extract email from mailto link or regex."""
     try:
         mail_link = soup.find('a', href=lambda h: h and h.startswith('mailto:'))
         if mail_link:
@@ -86,7 +113,6 @@ def _extract_email(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_phone(soup: BeautifulSoup) -> str:
-    """Extract phone from tel link or regex."""
     try:
         tel_link = soup.find('a', href=lambda h: h and h.startswith('tel:'))
         if tel_link:
@@ -103,7 +129,6 @@ def _extract_phone(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_owner_name(soup: BeautifulSoup) -> str:
-    """Extract owner name from 'Officer 1' label."""
     try:
         officer_elem = soup.find(string=re.compile('Officer 1', re.IGNORECASE))
         if officer_elem:
@@ -136,7 +161,6 @@ def _extract_owner_name(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_entity_type(soup: BeautifulSoup) -> str:
-    """Extract entity type by looking for standalone 'Carrier' or 'Broker' text."""
     try:
         for text in ['Carrier', 'Broker', 'Carrier/Broker', 'Broker/Carrier']:
             found = soup.find(string=re.compile(rf'^{re.escape(text)}$', re.IGNORECASE))
@@ -195,27 +219,88 @@ def _parse_html(html_content: str) -> dict:
         'safety': {},
         'insurance': {},
         'authority': {},
-        'source': 'requests',
+        'source': 'playwright',
     }
 
-def scrape_carrier_profile(dot_number: int) -> dict:
-    """Scrape carrier profile from dotsearch.io using requests only."""
+def scrape_with_requests(dot_number: int) -> dict:
     url = f"https://dotsearch.io/dot/{dot_number}"
-    logger.info(f"Scraping with requests: {url}")
+    logger.info(f"Attempting requests scrape for {url}")
     try:
         session = requests.Session()
         response = session.get(url, headers=HEADERS, timeout=20)
-        if response.status_code != 200:
-            return {
-                "error": f"HTTP {response.status_code} from dotsearch.io",
-                "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
-                "source": "error",
-            }
-        data = _parse_html(response.text)
-        data['company']['dot_number'] = str(dot_number)
-        return data
+        if response.status_code == 200:
+            data = _parse_html(response.text)
+            if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
+                data['company']['dot_number'] = str(dot_number)
+                data['source'] = 'requests'
+                return data
+            else:
+                logger.warning("Requests scrape returned no email/phone, likely JS-rendered")
+        else:
+            logger.warning(f"Requests scrape HTTP {response.status_code}")
     except Exception as e:
-        logger.error(f"Requests scrape failed: {e}")
+        logger.warning(f"Requests scrape failed: {e}")
+    return None
+
+def scrape_carrier_profile(dot_number: int) -> dict:
+    # Try requests first (faster, may work for some carriers)
+    result = scrape_with_requests(dot_number)
+    if result:
+        return result
+
+    # Now try Playwright
+    logger.info("Falling back to Playwright")
+    if not _install_playwright_if_needed():
+        return {
+            "error": "Playwright browser installation failed. Please try again.",
+            "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
+            "source": "error",
+        }
+
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {
+            "error": "Playwright library is missing. Install with: pip install playwright",
+            "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
+        }
+
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox',
+                    '--disable-dev-shm-usage',
+                    '--disable-gpu',
+                    '--disable-setuid-sandbox'
+                ]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            url = f"https://dotsearch.io/dot/{dot_number}"
+            logger.info(f"Navigating to {url}")
+
+            try:
+                page.goto(url, timeout=30000)
+                page.wait_for_selector('a[href^="tel:"], a[href^="mailto:"], h1', timeout=20000)
+                page.wait_for_timeout(3000)
+            except Exception as nav_e:
+                logger.warning(f"Page load/wait warning: {nav_e}")
+
+            html_content = page.content()
+            context.close()
+            browser.close()
+
+            data = _parse_html(html_content)
+            data['company']['dot_number'] = str(dot_number)
+            data['source'] = 'playwright'
+            return data
+
+    except Exception as e:
+        logger.error(f"Error scraping DOT {dot_number}: {e}")
         return {
             "error": f"Scraper notice: {str(e)}",
             "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
