@@ -2,15 +2,13 @@ import sys
 import asyncio
 import logging
 import re
-import os
 import requests
+import cloudscraper
 from bs4 import BeautifulSoup
-import subprocess
-from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 
-# Apply nest_asyncio safely
+# Apply nest_asyncio safely (for compatibility)
 try:
     import nest_asyncio
     nest_asyncio.apply()
@@ -35,39 +33,6 @@ HEADERS = {
     "Sec-Fetch-Site": "none",
     "Sec-Fetch-User": "?1",
 }
-
-PROXY_URLS = [
-    "https://api.allorigins.win/raw?url={}",
-    "https://corsproxy.io/?url={}",
-]
-
-def _install_playwright_if_needed():
-    """Check if Playwright browser exists; if not, install it."""
-    cache_dir = os.path.expanduser("~/.cache/ms-playwright")
-    if os.path.exists(cache_dir):
-        for name in os.listdir(cache_dir):
-            if name.startswith("chromium-"):
-                chrome_path = os.path.join(cache_dir, name, "chrome-linux", "chrome")
-                if os.path.exists(chrome_path):
-                    logger.info("Chromium browser already installed.")
-                    return True
-    try:
-        logger.info("Installing Playwright Chromium...")
-        res = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "chromium"],
-            check=False,
-            capture_output=True,
-            text=True
-        )
-        if res.returncode == 0:
-            logger.info("Playwright Chromium installed successfully.")
-            return True
-        else:
-            logger.warning(f"Playwright install failed: {res.stderr}")
-            return False
-    except Exception as e:
-        logger.warning(f"Could not run playwright install: {e}")
-        return False
 
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
     try:
@@ -213,116 +178,28 @@ def _parse_html(html_content: str) -> dict:
         'safety': {},
         'insurance': {},
         'authority': {},
-        'source': 'requests',
+        'source': 'cloudscraper',
     }
 
-def scrape_with_requests(dot_number: int) -> dict:
-    """Try direct requests first."""
-    url = f"https://dotsearch.io/dot/{dot_number}"
-    logger.info(f"Attempting direct requests scrape for {url}")
-    try:
-        response = requests.get(url, headers=HEADERS, timeout=20)
-        if response.status_code == 200:
-            data = _parse_html(response.text)
-            if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
-                data['company']['dot_number'] = str(dot_number)
-                data['source'] = 'direct'
-                return data
-            else:
-                logger.warning("Direct requests returned no email/phone")
-        else:
-            logger.warning(f"Direct requests HTTP {response.status_code}")
-    except Exception as e:
-        logger.warning(f"Direct requests failed: {e}")
-    return None
-
-def scrape_with_proxy(dot_number: int) -> dict:
-    """Try CORS proxies to bypass IP restrictions."""
-    url = f"https://dotsearch.io/dot/{dot_number}"
-    encoded_url = quote(url, safe='')
-    for proxy_template in PROXY_URLS:
-        proxy_url = proxy_template.format(encoded_url)
-        logger.info(f"Attempting proxy scrape via {proxy_url}")
-        try:
-            response = requests.get(proxy_url, headers=HEADERS, timeout=30)
-            if response.status_code == 200:
-                data = _parse_html(response.text)
-                if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
-                    data['company']['dot_number'] = str(dot_number)
-                    data['source'] = f'proxy_{proxy_template.split(".")[0]}'
-                    return data
-                else:
-                    logger.warning(f"Proxy returned no email/phone: {proxy_template}")
-            else:
-                logger.warning(f"Proxy HTTP {response.status_code}: {proxy_template}")
-        except Exception as e:
-            logger.warning(f"Proxy failed: {proxy_template}: {e}")
-    return None
-
 def scrape_carrier_profile(dot_number: int) -> dict:
-    # Try direct requests
-    result = scrape_with_requests(dot_number)
-    if result:
-        return result
-
-    # Try proxies
-    result = scrape_with_proxy(dot_number)
-    if result:
-        return result
-
-    # Fallback to Playwright (requires dependencies)
-    logger.info("Falling back to Playwright")
-    if not _install_playwright_if_needed():
-        return {
-            "error": "Playwright browser installation failed. Please try again.",
-            "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
-            "source": "error",
-        }
-
+    """Scrape carrier profile from dotsearch.io using cloudscraper."""
+    url = f"https://dotsearch.io/dot/{dot_number}"
+    logger.info(f"Scraping with cloudscraper: {url}")
     try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        return {
-            "error": "Playwright library is missing. Install with: pip install playwright",
-            "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
-        }
-
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(
-                headless=True,
-                args=[
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-gpu',
-                    '--disable-setuid-sandbox'
-                ]
-            )
-            context = browser.new_context(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            )
-            page = context.new_page()
-            url = f"https://dotsearch.io/dot/{dot_number}"
-            logger.info(f"Navigating to {url}")
-
-            try:
-                page.goto(url, timeout=30000)
-                page.wait_for_selector('a[href^="tel:"], a[href^="mailto:"], h1', timeout=20000)
-                page.wait_for_timeout(3000)
-            except Exception as nav_e:
-                logger.warning(f"Page load/wait warning: {nav_e}")
-
-            html_content = page.content()
-            context.close()
-            browser.close()
-
-            data = _parse_html(html_content)
-            data['company']['dot_number'] = str(dot_number)
-            data['source'] = 'playwright'
-            return data
-
+        scraper = cloudscraper.create_scraper()
+        response = scraper.get(url, headers=HEADERS, timeout=30)
+        if response.status_code != 200:
+            logger.warning(f"Cloudscraper HTTP {response.status_code}")
+            return {
+                "error": f"HTTP {response.status_code} from dotsearch.io",
+                "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
+                "source": "error",
+            }
+        data = _parse_html(response.text)
+        data['company']['dot_number'] = str(dot_number)
+        return data
     except Exception as e:
-        logger.error(f"Error scraping DOT {dot_number}: {e}")
+        logger.error(f"Cloudscraper failed: {e}")
         return {
             "error": f"Scraper notice: {str(e)}",
             "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
