@@ -55,12 +55,14 @@ def _safe_extract(soup: BeautifulSoup, selector: str, default: str = 'N/A') -> s
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
     """Attempts to find a label and extract the adjacent or sibling value."""
     try:
+        # Look for text containing label
         elements = soup.find_all(string=lambda text: text and label_text.lower() in text.lower())
         for element in elements:
             parent = element.parent
             if not parent:
                 continue
                 
+            # Check parent or parent's siblings
             if parent.name in ['th', 'td', 'dt', 'span', 'div', 'strong', 'b']:
                 sibling = parent.find_next_sibling()
                 if sibling:
@@ -68,12 +70,14 @@ def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A'
                     if val:
                         return val
                 
+                # Check text after colon in same element
                 text = parent.get_text(strip=True)
                 if ':' in text:
                     parts = text.split(':', 1)
                     if len(parts) > 1 and parts[1].strip():
                         return parts[1].strip()
                         
+                # Check parent's parent sibling
                 if parent.parent:
                     parent_sibling = parent.parent.find_next_sibling()
                     if parent_sibling:
@@ -179,12 +183,20 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             logger.info(f"Navigating to {url}")
             
             try:
-                page.goto(url, timeout=25000)
-                page.wait_for_load_state('networkidle', timeout=15000)
+                page.goto(url, timeout=30000)
+                # Wait for network to be idle (increased timeout)
+                page.wait_for_load_state('networkidle', timeout=20000)
+                # Additional wait for dynamic content
+                page.wait_for_timeout(5000)  # 5 seconds
             except Exception as nav_e:
                 logger.warning(f"Page load timeout/warning: {nav_e}")
             
-            time.sleep(1.5)
+            # Try to wait for a common element that indicates data loaded
+            try:
+                page.wait_for_selector('div.card, div[class*="card"], h1', timeout=10000)
+            except Exception:
+                pass
+            
             html_content = page.content()
             context.close()
             browser.close()
