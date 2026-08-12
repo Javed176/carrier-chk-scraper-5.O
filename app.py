@@ -24,6 +24,7 @@ try:
     from ui_components import (
         inject_custom_css,
         render_header,
+        render_carrier_table,
         render_company_card,
         render_contact_section,
         render_operations_section,
@@ -39,7 +40,9 @@ except Exception as import_err:
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_fmcsa_data(mc_number, api_key):
-    return resolve_mc_to_usdot(mc_number, api_key)
+    res = resolve_mc_to_usdot(mc_number, api_key)
+    res['searched_mc'] = mc_number
+    return res
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_carrier_profile(dot_number):
@@ -50,6 +53,8 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
     p = profile_data or {}
     f = fmcsa_data or {}
     
+    p['searched_mc'] = f.get('searched_mc', '')
+
     comp = p.get('company', {})
     if comp.get('legal_name', 'N/A') in ['N/A', 'Unknown', '']:
         comp['legal_name'] = f.get('legal_name', 'Unknown Carrier')
@@ -57,8 +62,11 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
         comp['dba_name'] = f.get('dba_name', '')
     if comp.get('dot_number', 'N/A') in ['N/A', '']:
         comp['dot_number'] = str(f.get('dot_number', 'N/A'))
-    if comp.get('mc_number', 'N/A') in ['N/A', '']:
-        comp['mc_number'] = str(f.get('docket_number', 'N/A'))
+        
+    mc_val = f.get('docket_number') or f.get('searched_mc') or 'N/A'
+    if comp.get('mc_number', 'N/A') in ['N/A', '', 'None']:
+        comp['mc_number'] = str(mc_val)
+        
     if comp.get('operating_status', 'N/A') in ['N/A', 'Unknown', '']:
         comp['operating_status'] = f.get('status', 'Unknown')
     p['company'] = comp
@@ -141,8 +149,6 @@ def main():
             with st.spinner('Resolving MC number via FMCSA...'):
                 fmcsa_data = get_fmcsa_data(mc, api_key)
                 
-            render_fmcsa_summary(fmcsa_data)
-            
             dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
             if not dot_number:
                 raise Exception("USDOT number not found in FMCSA response.")
@@ -152,11 +158,13 @@ def main():
             
             profile = merge_fmcsa_and_profile(fmcsa_data, raw_profile)
             
+            # Display requested Carrier Table View (matching user's screenshot layout)
+            render_carrier_table(profile)
+            
+            # Display Quick Summary & Full Carrier Identity Details
+            render_fmcsa_summary(fmcsa_data)
+            
             st.divider()
-            
-            if "error" in profile and profile["error"]:
-                st.info(f"Information: {profile['error']}")
-            
             render_company_card(profile.get('company', {}))
                 
             col_a, col_b = st.columns(2)
