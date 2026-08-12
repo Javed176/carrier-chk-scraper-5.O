@@ -1,3 +1,4 @@
+st.cache_data.clear()
 import streamlit as st
 import sys
 import asyncio
