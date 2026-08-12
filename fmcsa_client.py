@@ -65,7 +65,7 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     elif allowed.upper() == "N":
         status = "Not Authorized"
 
-    # Entity type (try multiple possible keys)
+    # Entity type
     entity_type = _get_value(
         carrier,
         "entityType",
@@ -82,7 +82,6 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
         broker_auth = _get_value(carrier, "brokerAuthorityStatus", "broker_authority", default="")
         common_auth = _get_value(carrier, "commonAuthorityStatus", "common_authority", default="")
         if broker_auth or common_auth:
-            # If broker authority exists, likely broker/carrier combo
             entity_type = "BROKER/CARRIER"
         else:
             entity_type = "UNKNOWN"
