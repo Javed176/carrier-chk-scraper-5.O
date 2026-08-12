@@ -3,7 +3,7 @@ import sys
 import asyncio
 import time
 
-DEBUG = True
+DEBUG = True  # Set to False to hide debug expander
 
 st.set_page_config(
     page_title='MC Carrier Intelligence',
@@ -121,10 +121,10 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
         except Exception:
             fmcsa_detail = {}
 
-    # 3. Scrape dotsearch (optional)
+    # 3. Scrape dotsearch using cloudscraper (or direct)
     raw_profile = {}
     if dot_number:
-        raw_profile = get_carrier_profile(str(dot_number), cache_version=8)
+        raw_profile = get_carrier_profile(str(dot_number), cache_version=9)  # bump to invalidate old cache
 
     # 4. Merge all data (priority: FMCSA detail > FMCSA basic > scraper)
     combined_fmcsa = {**fmcsa_data, **fmcsa_detail}
