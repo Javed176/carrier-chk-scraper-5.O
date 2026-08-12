@@ -4,6 +4,7 @@ import subprocess
 import logging
 import re
 import time
+import os
 import streamlit as st
 import requests
 from bs4 import BeautifulSoup
@@ -36,13 +37,30 @@ HEADERS = {
     "Sec-Fetch-User": "?1",
 }
 
-@st.cache_resource
-def install_playwright_browsers():
-    """Installs Playwright Chromium browser binary with dependencies."""
+def ensure_playwright_browser():
+    """Ensure Playwright Chromium browser is installed. Returns True if ready."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        logger.error("Playwright is not installed.")
+        return False
+
+    # Check if browser binary exists in default cache path
+    browser_dir = os.path.expanduser("~/.cache/ms-playwright")
+    if os.path.exists(browser_dir):
+        # Check for chromium subfolder
+        for name in os.listdir(browser_dir):
+            if name.startswith("chromium-"):
+                chrome_path = os.path.join(browser_dir, name, "chrome-linux", "chrome")
+                if os.path.exists(chrome_path):
+                    logger.info("Chromium browser already installed.")
+                    return True
+
+    # Install browser (without --with-deps, because system libs are in packages.txt)
     try:
         logger.info("Installing Playwright Chromium browser...")
         res = subprocess.run(
-            [sys.executable, "-m", "playwright", "install", "--with-deps", "chromium"],
+            [sys.executable, "-m", "playwright", "install", "chromium"],
             check=False,
             capture_output=True,
             text=True
@@ -51,40 +69,35 @@ def install_playwright_browsers():
             logger.info("Playwright Chromium installed successfully.")
             return True
         else:
-            logger.warning(f"Playwright install warning: {res.stderr}")
+            logger.warning(f"Playwright install failed: {res.stderr}")
             return False
     except Exception as e:
-        logger.warning(f"Could not run playwright install command: {e}")
+        logger.warning(f"Could not run playwright install: {e}")
         return False
 
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
     """Generic label-value extractor using BeautifulSoup."""
     try:
-        # Find all elements containing the label text
         for elem in soup.find_all(string=re.compile(re.escape(label_text), re.IGNORECASE)):
             parent = elem.parent
             if not parent:
                 continue
 
-            # Case 1: label and value are siblings
             sibling = parent.find_next_sibling()
             if sibling and sibling.get_text(strip=True):
                 return sibling.get_text(strip=True)
 
-            # Case 2: label and value in same element separated by colon
             text = parent.get_text(strip=True)
             if ':' in text:
                 parts = text.split(':', 1)
                 if len(parts) > 1 and parts[1].strip():
                     return parts[1].strip()
 
-            # Case 3: value is inside parent's parent's next sibling
             if parent.parent:
                 parent_sibling = parent.parent.find_next_sibling()
                 if parent_sibling and parent_sibling.get_text(strip=True):
                     return parent_sibling.get_text(strip=True)
 
-            # Case 4: label is in a table cell, value is next cell in same row
             if parent.name in ['th', 'td']:
                 next_td = parent.find_next('td')
                 if next_td and next_td.get_text(strip=True):
@@ -94,7 +107,6 @@ def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A'
     return default
 
 def _extract_email(soup: BeautifulSoup) -> str:
-    """Extract email from mailto link or regex."""
     try:
         mail_link = soup.find('a', href=lambda h: h and h.startswith('mailto:'))
         if mail_link:
@@ -111,7 +123,6 @@ def _extract_email(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_phone(soup: BeautifulSoup) -> str:
-    """Extract phone from tel link or regex."""
     try:
         tel_link = soup.find('a', href=lambda h: h and h.startswith('tel:'))
         if tel_link:
@@ -128,31 +139,25 @@ def _extract_phone(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_owner_name(soup: BeautifulSoup) -> str:
-    """Extract owner name from 'Officer 1' label."""
     try:
-        # Find element containing 'Officer 1'
         officer_elem = soup.find(string=re.compile('Officer 1', re.IGNORECASE))
         if officer_elem:
             parent = officer_elem.parent
             if parent:
-                # Try next sibling first
                 sibling = parent.find_next_sibling()
                 if sibling and sibling.get_text(strip=True):
                     return sibling.get_text(strip=True)
 
-                # Try parent's next sibling
                 if parent.parent:
                     parent_sibling = parent.parent.find_next_sibling()
                     if parent_sibling and parent_sibling.get_text(strip=True):
                         return parent_sibling.get_text(strip=True)
 
-                # If parent is a cell, get next cell
                 if parent.name in ['th', 'td']:
                     next_td = parent.find_next('td')
                     if next_td and next_td.get_text(strip=True):
                         return next_td.get_text(strip=True)
 
-                # Fallback: look for next line in parent's text
                 text = parent.get_text(separator='\n')
                 lines = text.split('\n')
                 for i, line in enumerate(lines):
@@ -166,9 +171,7 @@ def _extract_owner_name(soup: BeautifulSoup) -> str:
     return 'N/A'
 
 def _extract_entity_type(soup: BeautifulSoup) -> str:
-    """Extract entity type by looking for standalone 'Carrier' or 'Broker' text."""
     try:
-        # Look for exact text matches in any tag
         for text in ['Carrier', 'Broker', 'Carrier/Broker', 'Broker/Carrier']:
             found = soup.find(string=re.compile(rf'^{re.escape(text)}$', re.IGNORECASE))
             if found:
@@ -176,7 +179,6 @@ def _extract_entity_type(soup: BeautifulSoup) -> str:
     except Exception:
         pass
 
-    # Fallback: label extraction
     val = _extract_by_label(soup, 'Entity Type', default='')
     if val and val.lower() not in ['n/a', 'unknown', '']:
         return val
@@ -184,10 +186,8 @@ def _extract_entity_type(soup: BeautifulSoup) -> str:
     return 'Unknown'
 
 def _parse_html(html_content: str) -> dict:
-    """Parse HTML and extract profile data."""
     soup = BeautifulSoup(html_content, 'html.parser')
 
-    # Extract fields
     legal_name = _extract_by_label(soup, 'Legal Name', default='')
     dba_name = _extract_by_label(soup, 'DBA Name', default='')
     mc_number = _extract_by_label(soup, 'MC Number', default='')
@@ -200,7 +200,6 @@ def _parse_html(html_content: str) -> dict:
     email = _extract_email(soup)
     owner_name = _extract_owner_name(soup)
 
-    # If legal_name is still empty, use h1 or page title
     if not legal_name or legal_name in ['N/A', 'None', '']:
         h1 = soup.find('h1')
         if h1:
@@ -234,7 +233,6 @@ def _parse_html(html_content: str) -> dict:
     }
 
 def scrape_with_requests(dot_number: int) -> dict:
-    """Try to scrape using direct HTTP requests."""
     url = f"https://dotsearch.io/dot/{dot_number}"
     logger.info(f"Attempting requests scrape for {url}")
     try:
@@ -242,7 +240,6 @@ def scrape_with_requests(dot_number: int) -> dict:
         response = session.get(url, headers=HEADERS, timeout=20)
         if response.status_code == 200:
             data = _parse_html(response.text)
-            # If we got useful data (email or phone), return it
             if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
                 data['company']['dot_number'] = str(dot_number)
                 return data
@@ -255,7 +252,6 @@ def scrape_with_requests(dot_number: int) -> dict:
     return None
 
 def scrape_carrier_profile(dot_number: int) -> dict:
-    """Scrapes carrier profile from dotsearch.io using requests first, then Playwright fallback."""
     # First try requests
     result = scrape_with_requests(dot_number)
     if result:
@@ -263,6 +259,13 @@ def scrape_carrier_profile(dot_number: int) -> dict:
 
     # Fallback to Playwright
     logger.info("Falling back to Playwright")
+    if not ensure_playwright_browser():
+        return {
+            "error": "Playwright browser installation failed. Please try again.",
+            "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
+            "source": "error",
+        }
+
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -270,8 +273,6 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             "error": "Playwright library is missing. Install with: pip install playwright",
             "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
         }
-
-    install_playwright_browsers()
 
     try:
         with sync_playwright() as p:
