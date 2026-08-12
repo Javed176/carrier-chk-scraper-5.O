@@ -1,18 +1,12 @@
-import streamlit as st
-import pandas as pd
-from playwright.sync_api import sync_playwright
+import os
 import time
-import subprocess
+import pandas as pd
+import streamlit as st
 
-# Auto-install Playwright browser binaries on deployment
-@st.cache_resource
-def install_playwright_browsers():
-    try:
-        subprocess.run(["playwright", "install", "chromium"], check=True)
-    except Exception as e:
-        st.error(f"Error installing Playwright browser: {e}")
+# Install Playwright browser binaries silently on container build
+os.system("playwright install chromium")
 
-install_playwright_browsers()
+from playwright.sync_api import sync_playwright
 
 st.set_page_config(page_title="DOT Search Scraper", layout="wide")
 st.title("Background DOT / Broker Search")
@@ -26,7 +20,6 @@ with col2:
 def scrape_dotsearch(query, max_items):
     data = []
     with sync_playwright() as p:
-        # Launch Chromium headless with sandbox disabled for container compatibility
         browser = p.chromium.launch(
             headless=True,
             args=[
@@ -40,13 +33,11 @@ def scrape_dotsearch(query, max_items):
         
         page.goto("https://www.dotsearch.io/", wait_until="domcontentloaded")
         
-        # Fill search box
         search_input = page.wait_for_selector('input[type="text"], input[type="search"]')
         if search_input:
             search_input.fill(query)
             search_input.press("Enter")
         
-        # Wait for dynamic table rendering
         time.sleep(3)
         
         rows = page.query_selector_all("table tbody tr")
@@ -67,13 +58,13 @@ def scrape_dotsearch(query, max_items):
     return pd.DataFrame(data)
 
 if st.button("Run Background Search") and search_query:
-    with st.spinner("Fetching background data from dotsearch.io..."):
+    with st.spinner("Fetching background data..."):
         try:
             df = scrape_dotsearch(search_query, max_results)
             if not df.empty:
-                st.success(f"Retrieved {len(df)} records successfully!")
+                st.success(f"Retrieved {len(df)} records!")
                 st.dataframe(df, use_container_width=True)
             else:
-                st.warning("No records found for the given search input.")
+                st.warning("No records found for this input.")
         except Exception as e:
             st.error(f"Execution Error: {e}")
