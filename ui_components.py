@@ -242,7 +242,8 @@ def render_status_badge(status: str) -> str:
 def render_history_table(history_list: list):
     """
     Renders the master history table as a native Streamlit dataframe.
-    Columns: MC Number, Carrier/Broker Name, Operating Status, Email Address, Location.
+    Columns: MC Number, Carrier/Broker Name, Entity Type, Operating Status,
+             Phone Number, Email Address, Owner Name, Location.
     """
     if not history_list:
         return
@@ -263,8 +264,18 @@ def render_history_table(history_list: list):
         if dba:
             name = f"{name} (DBA: {dba})"
         
+        # Entity type mapping
+        entity_raw = str(comp.get('entity_type', '')).upper()
+        if 'BROKER' in entity_raw:
+            entity_type = 'Broker'
+        elif 'CARRIER' in entity_raw:
+            entity_type = 'Carrier'
+        elif entity_raw in ['N/A', 'UNKNOWN', 'NONE', '']:
+            entity_type = 'Unknown'
+        else:
+            entity_type = comp.get('entity_type', 'Unknown')
+        
         status = comp.get('operating_status', 'UNKNOWN')
-        # Map status to emoji + text
         status_upper = str(status).upper()
         if status_upper in ['ACTIVE', 'AUTHORIZED', 'SATISFACTORY', 'Y']:
             status_display = "🟢 Active"
@@ -275,20 +286,35 @@ def render_history_table(history_list: list):
         else:
             status_display = "⚪ Unknown"
         
+        phone = contact.get('phone', 'N/A')
         email = contact.get('email', 'N/A')
+        owner_name = comp.get('owner_name', 'N/A')
         location = contact.get('physical_address', 'N/A')
         
         rows.append({
             'MC Number': mc,
             'Carrier / Broker Name': name,
+            'Entity Type': entity_type,
             'Operating Status': status_display,
+            'Phone Number': phone,
             'Email Address': email,
+            'Owner Name': owner_name,
             'Location': location
         })
     
-    df = pd.DataFrame(rows, columns=['MC Number', 'Carrier / Broker Name', 'Operating Status', 'Email Address', 'Location'])
+    df = pd.DataFrame(rows, columns=[
+        'MC Number',
+        'Carrier / Broker Name',
+        'Entity Type',
+        'Operating Status',
+        'Phone Number',
+        'Email Address',
+        'Owner Name',
+        'Location'
+    ])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+# Keep other functions for compatibility (not used in simplified app)
 def render_company_card(data: dict):
     if not data:
         return
