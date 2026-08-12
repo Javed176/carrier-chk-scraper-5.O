@@ -37,7 +37,6 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     """
     content = data.get("content", {})
     if isinstance(content, list) and len(content) > 0:
-        # In case the content is a list of results (sometimes happens with docket lookups)
         carrier = content[0].get("carrier", {})
     elif isinstance(content, dict):
         carrier = content.get("carrier", {})
@@ -64,12 +63,14 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         status = "Unknown"
     
-    # Additional fields we can pull
+    # Additional fields
     entity_type = carrier.get("entityType", "")
     operation_class = carrier.get("operationClass", "")
     power_units = carrier.get("powerUnits", "")
     drivers = carrier.get("drivers", "")
-    email = carrier.get("email", "")  # May not exist, but we try
+    email = carrier.get("email", "")
+    phone = carrier.get("phyPhone", "")
+    owner_name = carrier.get("ownerName", carrier.get("contactName", carrier.get("principalName", "")))
     
     return {
         "dot_number": carrier.get("dotNumber"),
@@ -79,13 +80,14 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
         "out_of_service": oos,
         "docket_number": carrier.get("docketNumber"),
         "physical_address": physical_address,
-        "phone": carrier.get("phyPhone"),
+        "phone": phone,
         "status": status,
         "entity_type": entity_type,
         "operation_classification": operation_class,
         "power_units": power_units,
         "drivers": drivers,
         "email": email,
+        "owner_name": owner_name,
     }
 
 def _handle_response(response: requests.Response) -> Dict[str, Any]:
