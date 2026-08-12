@@ -2,51 +2,54 @@ import streamlit as st
 import pandas as pd
 from playwright.sync_api import sync_playwright
 import time
-import os
 import subprocess
 
-# Ensure Playwright Chromium browser is installed on Streamlit Cloud
+# Auto-install Playwright browser binaries on deployment
 @st.cache_resource
 def install_playwright_browsers():
     try:
         subprocess.run(["playwright", "install", "chromium"], check=True)
     except Exception as e:
-        st.error(f"Failed to install Playwright browser: {e}")
+        st.error(f"Error installing Playwright browser: {e}")
 
 install_playwright_browsers()
 
 st.set_page_config(page_title="DOT Search Scraper", layout="wide")
 st.title("Background DOT / Broker Search")
 
-# Input Controls
 col1, col2 = st.columns([3, 1])
 with col1:
     search_query = st.text_input("Enter Search Term (MC#, Legal Name, Phone, etc.):")
 with col2:
-    max_results = st.number_input("Max Results to Fetch", min_value=5, max_value=100, value=20)
+    max_results = st.number_input("Max Results", min_value=5, max_value=100, value=20)
 
 def scrape_dotsearch(query, max_items):
     data = []
-    
     with sync_playwright() as p:
-        # Launch Chromium headless
+        # Launch Chromium headless with sandbox disabled for container compatibility
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=[
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
+            ]
         )
         page = browser.new_page()
         
         page.goto("https://www.dotsearch.io/", wait_until="domcontentloaded")
         
+        # Fill search box
         search_input = page.wait_for_selector('input[type="text"], input[type="search"]')
         if search_input:
             search_input.fill(query)
             search_input.press("Enter")
         
+        # Wait for dynamic table rendering
         time.sleep(3)
         
         rows = page.query_selector_all("table tbody tr")
-        
         for row in rows[:max_items]:
             cols = row.query_selector_all("td")
             if len(cols) >= 7:
@@ -61,18 +64,16 @@ def scrape_dotsearch(query, max_items):
                 })
         
         browser.close()
-    
     return pd.DataFrame(data)
 
 if st.button("Run Background Search") and search_query:
-    with st.spinner("Extracting data in background..."):
+    with st.spinner("Fetching background data from dotsearch.io..."):
         try:
             df = scrape_dotsearch(search_query, max_results)
-            
             if not df.empty:
-                st.success(f"Successfully scraped {len(df)} records!")
+                st.success(f"Retrieved {len(df)} records successfully!")
                 st.dataframe(df, use_container_width=True)
             else:
-                st.warning("No data found.")
+                st.warning("No records found for the given search input.")
         except Exception as e:
             st.error(f"Execution Error: {e}")
