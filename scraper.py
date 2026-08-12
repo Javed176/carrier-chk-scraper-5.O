@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import streamlit as st
+import requests
 from bs4 import BeautifulSoup
 
 logger = logging.getLogger(__name__)
@@ -21,6 +22,19 @@ if sys.platform == 'win32':
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception as e:
         logger.warning(f"Event loop policy warning: {e}")
+
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Sec-Fetch-User": "?1",
+}
 
 @st.cache_resource
 def install_playwright_browsers():
@@ -169,8 +183,86 @@ def _extract_entity_type(soup: BeautifulSoup) -> str:
 
     return 'Unknown'
 
+def _parse_html(html_content: str) -> dict:
+    """Parse HTML and extract profile data."""
+    soup = BeautifulSoup(html_content, 'html.parser')
+
+    # Extract fields
+    legal_name = _extract_by_label(soup, 'Legal Name', default='')
+    dba_name = _extract_by_label(soup, 'DBA Name', default='')
+    mc_number = _extract_by_label(soup, 'MC Number', default='')
+    operating_status = _extract_by_label(soup, 'Operating Status', default='')
+    physical_address = _extract_by_label(soup, 'Physical Address', default='')
+    mailing_address = _extract_by_label(soup, 'Mailing Address', default='')
+
+    entity_type = _extract_entity_type(soup)
+    phone = _extract_phone(soup)
+    email = _extract_email(soup)
+    owner_name = _extract_owner_name(soup)
+
+    # If legal_name is still empty, use h1 or page title
+    if not legal_name or legal_name in ['N/A', 'None', '']:
+        h1 = soup.find('h1')
+        if h1:
+            legal_name = h1.get_text(strip=True)
+
+    return {
+        'company': {
+            'legal_name': legal_name if legal_name and legal_name != 'N/A' else 'Unknown',
+            'dba_name': dba_name if dba_name and dba_name != 'N/A' else '',
+            'dot_number': '',
+            'mc_number': mc_number if mc_number and mc_number != 'N/A' else '',
+            'operating_status': operating_status if operating_status and operating_status != 'N/A' else 'Unknown',
+            'entity_type': entity_type if entity_type != 'Unknown' else 'Unknown',
+            'owner_name': owner_name if owner_name != 'N/A' else 'N/A',
+        },
+        'contact': {
+            'physical_address': physical_address if physical_address and physical_address != 'N/A' else 'N/A',
+            'mailing_address': mailing_address if mailing_address and mailing_address != 'N/A' else '',
+            'phone': phone if phone != 'N/A' else 'N/A',
+            'email': email if email != 'N/A' else 'N/A',
+        },
+        'fleet': {
+            'power_units': 'N/A',
+            'drivers': 'N/A',
+            'cargo_types': [],
+        },
+        'safety': {},
+        'insurance': {},
+        'authority': {},
+        'source': 'requests',
+    }
+
+def scrape_with_requests(dot_number: int) -> dict:
+    """Try to scrape using direct HTTP requests."""
+    url = f"https://dotsearch.io/dot/{dot_number}"
+    logger.info(f"Attempting requests scrape for {url}")
+    try:
+        session = requests.Session()
+        response = session.get(url, headers=HEADERS, timeout=20)
+        if response.status_code == 200:
+            data = _parse_html(response.text)
+            # If we got useful data (email or phone), return it
+            if data['contact']['email'] != 'N/A' or data['contact']['phone'] != 'N/A':
+                data['company']['dot_number'] = str(dot_number)
+                return data
+            else:
+                logger.warning("Requests scrape returned no email/phone, likely JS-rendered")
+        else:
+            logger.warning(f"Requests scrape HTTP {response.status_code}")
+    except Exception as e:
+        logger.warning(f"Requests scrape failed: {e}")
+    return None
+
 def scrape_carrier_profile(dot_number: int) -> dict:
-    """Scrapes carrier profile from dotsearch.io using Playwright and BeautifulSoup."""
+    """Scrapes carrier profile from dotsearch.io using requests first, then Playwright fallback."""
+    # First try requests
+    result = scrape_with_requests(dot_number)
+    if result:
+        return result
+
+    # Fallback to Playwright
+    logger.info("Falling back to Playwright")
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
@@ -201,7 +293,6 @@ def scrape_carrier_profile(dot_number: int) -> dict:
 
             try:
                 page.goto(url, timeout=30000)
-                # Wait for either a tel link or mail link or h1 to appear
                 page.wait_for_selector('a[href^="tel:"], a[href^="mailto:"], h1', timeout=20000)
                 page.wait_for_timeout(3000)
             except Exception as nav_e:
@@ -211,56 +302,15 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             context.close()
             browser.close()
 
-            soup = BeautifulSoup(html_content, 'html.parser')
-
-            # Extract fields
-            legal_name = _extract_by_label(soup, 'Legal Name', default='')
-            dba_name = _extract_by_label(soup, 'DBA Name', default='')
-            mc_number = _extract_by_label(soup, 'MC Number', default='')
-            operating_status = _extract_by_label(soup, 'Operating Status', default='')
-            physical_address = _extract_by_label(soup, 'Physical Address', default='')
-            mailing_address = _extract_by_label(soup, 'Mailing Address', default='')
-
-            entity_type = _extract_entity_type(soup)
-            phone = _extract_phone(soup)
-            email = _extract_email(soup)
-            owner_name = _extract_owner_name(soup)
-
-            # If legal_name is still empty, use h1 or page title
-            if not legal_name or legal_name in ['N/A', 'None', '']:
-                h1 = soup.find('h1')
-                if h1:
-                    legal_name = h1.get_text(strip=True)
-
-            return {
-                'company': {
-                    'legal_name': legal_name if legal_name and legal_name != 'N/A' else 'Unknown',
-                    'dba_name': dba_name if dba_name and dba_name != 'N/A' else '',
-                    'dot_number': str(dot_number),
-                    'mc_number': mc_number if mc_number and mc_number != 'N/A' else '',
-                    'operating_status': operating_status if operating_status and operating_status != 'N/A' else 'Unknown',
-                    'entity_type': entity_type if entity_type != 'Unknown' else 'Unknown',
-                    'owner_name': owner_name if owner_name != 'N/A' else 'N/A',
-                },
-                'contact': {
-                    'physical_address': physical_address if physical_address and physical_address != 'N/A' else 'N/A',
-                    'mailing_address': mailing_address if mailing_address and mailing_address != 'N/A' else '',
-                    'phone': phone if phone != 'N/A' else 'N/A',
-                    'email': email if email != 'N/A' else 'N/A',
-                },
-                'fleet': {
-                    'power_units': 'N/A',
-                    'drivers': 'N/A',
-                    'cargo_types': [],
-                },
-                'safety': {},
-                'insurance': {},
-                'authority': {},
-            }
+            data = _parse_html(html_content)
+            data['company']['dot_number'] = str(dot_number)
+            data['source'] = 'playwright'
+            return data
 
     except Exception as e:
         logger.error(f"Error scraping DOT {dot_number}: {e}")
         return {
             "error": f"Scraper notice: {str(e)}",
             "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
+            "source": "error",
         }
