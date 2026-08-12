@@ -314,7 +314,7 @@ def render_history_table(history_list: list):
     ])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
-# Keep other functions for compatibility (not used in simplified app)
+# --- Additional functions kept for compatibility (not used in current app) ---
 def render_company_card(data: dict):
     if not data:
         return
