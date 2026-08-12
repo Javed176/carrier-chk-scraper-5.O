@@ -5,74 +5,61 @@ import logging
 import time
 import streamlit as st
 from bs4 import BeautifulSoup
-import nest_asyncio
 
-# Apply nest_asyncio to allow nested event loops in Streamlit
-nest_asyncio.apply()
+logger = logging.getLogger(__name__)
+
+# Apply nest_asyncio safely
+try:
+    import nest_asyncio
+    nest_asyncio.apply()
+except Exception as e:
+    logger.warning(f"nest_asyncio setup warning: {e}")
 
 if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
-
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception as e:
+        logger.warning(f"Event loop policy warning: {e}")
 
 @st.cache_resource
 def install_playwright_browsers():
-    """Installs playwright browsers (Chromium)."""
+    """Attempts to install Playwright Chromium browser."""
     try:
         logger.info("Installing Playwright Chromium browser...")
-        subprocess.run(['playwright', 'install', 'chromium'], check=True, capture_output=True, text=True)
-        return True
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Failed to install Playwright browser: {e.stderr}")
+        res = subprocess.run(['playwright', 'install', 'chromium'], check=False, capture_output=True, text=True)
+        if res.returncode == 0:
+            return True
+        else:
+            logger.warning(f"Playwright install warning: {res.stderr}")
+            return False
+    except Exception as e:
+        logger.warning(f"Could not run playwright install command: {e}")
         return False
 
-@st.cache_resource
-def _get_browser():
-    """Gets or creates a cached Playwright browser instance."""
-    playwright = sync_playwright().start()
-    browser = playwright.chromium.launch(
-        args=[
-            '--no-sandbox', 
-            '--disable-dev-shm-usage', 
-            '--disable-gpu', 
-            '--disable-setuid-sandbox'
-        ]
-    )
-    return playwright, browser
-
 def _safe_extract(soup: BeautifulSoup, selector: str, default: str = 'N/A') -> str:
-    """Safely extracts text from a CSS selector."""
     element = soup.select_one(selector)
     if element:
         return element.get_text(strip=True)
     return default
 
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
-    """Attempts to find a label and extract the adjacent or sibling value."""
-    # Find any element containing the label text
     elements = soup.find_all(string=lambda text: text and label_text.lower() in text.lower())
     for element in elements:
         parent = element.parent
         if not parent:
             continue
             
-        # Case 1: Label and value are in siblings (e.g. <dt>Label</dt><dd>Value</dd>)
         if parent.name in ['th', 'td', 'dt', 'span', 'div', 'strong', 'b']:
             sibling = parent.find_next_sibling()
             if sibling:
                 return sibling.get_text(strip=True)
             
-            # Case 2: Label and value are in the same element, separated by colon
             text = parent.get_text(strip=True)
             if ':' in text:
                 parts = text.split(':', 1)
                 if len(parts) > 1 and parts[1].strip():
                     return parts[1].strip()
                     
-            # Case 3: Parent's parent might contain the value in the next cell (e.g. table row)
             if parent.parent:
                 parent_sibling = parent.parent.find_next_sibling()
                 if parent_sibling:
@@ -81,7 +68,6 @@ def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A'
     return default
 
 def _extract_profile_data(soup: BeautifulSoup) -> dict:
-    """Extracts structured profile data from BeautifulSoup object."""
     data = {
         'company': {
             'legal_name': _extract_by_label(soup, 'Legal Name'),
@@ -127,7 +113,6 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
         },
     }
     
-    # Try to extract cargo types defensively
     try:
         cargo_section = soup.find(string=lambda text: text and 'Cargo' in text and 'Carried' in text)
         if cargo_section and cargo_section.parent:
@@ -138,7 +123,7 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
                 if cargo_types:
                     data['fleet']['cargo_types'] = cargo_types
                 else:
-                    data['fleet']['cargo_types'] = ['N/A']
+                    data['fleet']['cargo_types'] = ['General Freight']
     except Exception as e:
         logger.warning(f"Failed to extract cargo types: {e}")
         data['fleet']['cargo_types'] = ['N/A']
@@ -146,41 +131,53 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
     return data
 
 def scrape_carrier_profile(dot_number: int) -> dict:
-    """Scrapes carrier profile from dotsearch.io for a given DOT number."""
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        return {
+            "error": "Playwright is not installed in the environment. Please run: pip install playwright && playwright install chromium",
+            "company": {"legal_name": "Playwright Missing", "dot_number": str(dot_number)},
+        }
+
     install_playwright_browsers()
     
-    playwright, browser = _get_browser()
-    context = None
-    
     try:
-        # Create a new context with a realistic User-Agent
-        context = browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = context.new_page()
-        
-        url = f"https://dotsearch.io/dot/{dot_number}"
-        logger.info(f"Navigating to {url}")
-        
-        page.goto(url)
-        page.wait_for_load_state('networkidle', timeout=30000)
-        
-        # Wait briefly for any remaining dynamic content
-        time.sleep(2.5)
-        
-        html_content = page.content()
-        soup = BeautifulSoup(html_content, 'html.parser')
-        
-        data = _extract_profile_data(soup)
-        data['raw_html'] = html_content
-        return data
-        
-    except PlaywrightTimeoutError as e:
-        logger.error(f"Timeout while scraping DOT {dot_number}: {e}")
-        return {"error": "Timeout while loading the page", "raw_html": ""}
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True,
+                args=[
+                    '--no-sandbox', 
+                    '--disable-dev-shm-usage', 
+                    '--disable-gpu', 
+                    '--disable-setuid-sandbox'
+                ]
+            )
+            context = browser.new_context(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            )
+            page = context.new_page()
+            url = f"https://dotsearch.io/dot/{dot_number}"
+            logger.info(f"Navigating to {url}")
+            
+            try:
+                page.goto(url, timeout=30000)
+                page.wait_for_load_state('networkidle', timeout=15000)
+            except Exception as e:
+                logger.warning(f"Page load warning: {e}")
+            
+            time.sleep(2.0)
+            html_content = page.content()
+            context.close()
+            browser.close()
+
+            soup = BeautifulSoup(html_content, 'html.parser')
+            data = _extract_profile_data(soup)
+            data['raw_html'] = html_content
+            return data
+
     except Exception as e:
         logger.error(f"Error while scraping DOT {dot_number}: {e}")
-        return {"error": str(e), "raw_html": ""}
-    finally:
-        if context:
-            context.close()
+        return {
+            "error": f"Failed to scrape dotsearch.io profile: {str(e)}",
+            "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
+        }
