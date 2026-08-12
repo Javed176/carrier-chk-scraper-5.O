@@ -3,7 +3,8 @@ import sys
 import asyncio
 import time
 
-# Page config MUST be the first Streamlit command
+DEBUG = True  # Set to False to hide debug info
+
 st.set_page_config(
     page_title='MC Carrier Intelligence',
     page_icon='🚛',
@@ -11,14 +12,12 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
-# Safe event loop policy configuration
 if sys.platform == 'win32':
     try:
         asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
     except Exception:
         pass
 
-# Safe imports
 try:
     from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
     from scraper import scrape_carrier_profile
@@ -32,7 +31,6 @@ except Exception as import_err:
     st.error(f"Initialization Error: Failed to load required modules: {import_err}")
     st.stop()
 
-# Initialize Session State Variables
 if 'history' not in st.session_state:
     st.session_state['history'] = []
 if 'is_auto_running' not in st.session_state:
@@ -51,40 +49,31 @@ def get_carrier_profile(dot_number, cache_version=1):
     return scrape_carrier_profile(dot_number)
 
 def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
-    """Merges FMCSA primary response into profile data as fallbacks for any missing fields."""
     p = profile_data or {}
     f = fmcsa_data or {}
-
     p['searched_mc'] = f.get('searched_mc', p.get('searched_mc', ''))
 
     comp = p.get('company', {})
-
-    # Legal name fallback (override scraper fallback like "Carrier DOT #...")
     current_name = comp.get('legal_name', '')
     fmcsa_name = f.get('legal_name', '')
     if (not current_name or current_name in ['N/A', 'Unknown', 'None'] or str(current_name).startswith('Carrier DOT #')) and fmcsa_name:
         comp['legal_name'] = fmcsa_name
 
-    # DBA name
     if not comp.get('dba_name') and f.get('dba_name'):
         comp['dba_name'] = f.get('dba_name')
 
-    # DOT number
     if not comp.get('dot_number') or comp.get('dot_number') in ['N/A', '']:
         comp['dot_number'] = str(f.get('dot_number', comp.get('dot_number', 'N/A')))
 
-    # MC number
     mc_val = f.get('docket_number') or f.get('searched_mc') or comp.get('mc_number', 'N/A')
     if not comp.get('mc_number') or comp.get('mc_number') in ['N/A', 'None', '']:
         comp['mc_number'] = str(mc_val)
 
-    # Operating status
     current_status = comp.get('operating_status', '')
     fmcsa_status = f.get('status', '')
     if (not current_status or current_status in ['N/A', 'Unknown', 'None']) and fmcsa_status:
         comp['operating_status'] = fmcsa_status
 
-    # Entity type
     current_entity = comp.get('entity_type', '')
     fmcsa_entity = f.get('entity_type', '')
     if (not current_entity or current_entity in ['N/A', 'Unknown', 'None', '']):
@@ -93,7 +82,6 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
         else:
             comp['entity_type'] = current_entity if current_entity else 'Unknown'
 
-    # Owner name
     current_owner = comp.get('owner_name', '')
     fmcsa_owner = f.get('owner_name', '')
     if (not current_owner or current_owner in ['N/A', 'None', '']) and fmcsa_owner:
@@ -113,7 +101,6 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
     return p
 
 def process_single_mc_lookup(mc_str: str, api_key: str):
-    """Executes a lookup for a single MC string and appends to history if successful."""
     mc_clean = mc_str.strip()
     if not mc_clean:
         return None
@@ -122,11 +109,18 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
     dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
 
     if dot_number:
-        raw_profile = get_carrier_profile(str(dot_number), cache_version=2)  # bump version to invalidate old cache
+        raw_profile = get_carrier_profile(str(dot_number), cache_version=3)
     else:
         raw_profile = {}
 
     profile = merge_fmcsa_and_profile(fmcsa_data, raw_profile)
+
+    # Debug output
+    if DEBUG:
+        with st.expander(f"Debug for MC {mc_clean}", expanded=False):
+            st.write("**FMCSA Data:**", fmcsa_data)
+            st.write("**Raw Profile from Scraper:**", raw_profile)
+            st.write("**Merged Profile:**", profile)
 
     existing_mcs = [item.get('searched_mc') for item in st.session_state['history']]
     if mc_clean not in existing_mcs:
@@ -236,7 +230,6 @@ def main():
                 st.session_state['current_auto_mc'] += 1
                 st.rerun()
 
-    # Display ONLY the master history table
     if st.session_state['history']:
         st.subheader("📊 Searched Carriers Master History")
         render_history_table(st.session_state['history'])
