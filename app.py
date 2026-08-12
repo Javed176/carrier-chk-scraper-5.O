@@ -2,7 +2,7 @@ import streamlit as st
 import sys
 import asyncio
 
-# Page config must be the first Streamlit command
+# Page config MUST be the first Streamlit command
 st.set_page_config(
     page_title='MC Carrier Lookup',
     page_icon='🚛',
@@ -10,24 +10,32 @@ st.set_page_config(
     initial_sidebar_state='expanded'
 )
 
-from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
-from scraper import scrape_carrier_profile
-from ui_components import (
-    inject_custom_css,
-    render_header,
-    render_company_card,
-    render_contact_section,
-    render_operations_section,
-    render_safety_section,
-    render_insurance_section,
-    render_authority_section,
-    render_fmcsa_summary,
-    render_error_card
-)
-
-# Set Windows event loop policy
+# Safe event loop policy configuration
 if sys.platform == 'win32':
-    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
+
+# Safe imports
+try:
+    from fmcsa_client import resolve_mc_to_usdot, FMCSAError, FMCSAAuthError, FMCSANotFoundError
+    from scraper import scrape_carrier_profile
+    from ui_components import (
+        inject_custom_css,
+        render_header,
+        render_company_card,
+        render_contact_section,
+        render_operations_section,
+        render_safety_section,
+        render_insurance_section,
+        render_authority_section,
+        render_fmcsa_summary,
+        render_error_card
+    )
+except Exception as import_err:
+    st.error(f"Initialization Error: Failed to import required modules. {import_err}")
+    st.stop()
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def get_fmcsa_data(mc_number, api_key):
@@ -41,6 +49,14 @@ def main():
     inject_custom_css()
     render_header()
     
+    # Safe retrieval of secrets
+    default_webkey = ""
+    try:
+        if hasattr(st, "secrets") and "FMCSA_WEB_KEY" in st.secrets:
+            default_webkey = st.secrets["FMCSA_WEB_KEY"]
+    except Exception:
+        default_webkey = ""
+    
     # Sidebar
     st.sidebar.title('🚛 MC Carrier Lookup')
     st.sidebar.divider()
@@ -49,7 +65,7 @@ def main():
     api_key = st.sidebar.text_input(
         'FMCSA WebKey', 
         type='password', 
-        value=st.secrets.get('FMCSA_WEB_KEY', ''), 
+        value=default_webkey, 
         help='Get your free key at mobile.fmcsa.dot.gov'
     )
     
@@ -57,9 +73,9 @@ def main():
     st.sidebar.subheader('About')
     st.sidebar.markdown(
         "Look up carrier information and safety records using an MC number. "
-        "Data is aggregated from FMCSA and online sources."
+        "Data is aggregated from FMCSA and dotsearch.io."
     )
-    st.sidebar.markdown("[FMCSA Developer Portal](https://mobile.fmcsa.dot.gov/developer)")
+    st.sidebar.markdown("[FMCSA Developer Portal](https://mobile.fmcsa.dot.gov/QCDevsite/docs/apiAccess)")
     
     st.sidebar.divider()
     st.sidebar.subheader('How It Works')
@@ -100,7 +116,6 @@ def main():
                 
             render_fmcsa_summary(fmcsa_data)
             
-            # Assuming dot_number is available in fmcsa_data
             dot_number = fmcsa_data.get('dot_number') or fmcsa_data.get('content', {}).get('carrier', {}).get('dotNumber')
             if not dot_number:
                 raise Exception("USDOT number not found in FMCSA response.")
@@ -109,6 +124,9 @@ def main():
                 profile = get_carrier_profile(str(dot_number))
             
             st.divider()
+            
+            if "error" in profile and profile["error"]:
+                st.warning(f"Note: {profile['error']}")
             
             render_company_card(profile.get('company', {}))
                 
@@ -135,7 +153,7 @@ def main():
         except Exception as e:
             err_msg = str(e).lower()
             if 'scrape' in err_msg or 'playwright' in err_msg or 'timeout' in err_msg:
-                render_error_card('Scraping Error', f"Failed to retrieve profile data from dotsearch.io. Please try again later. Details: {str(e)}")
+                render_error_card('Scraping Error', f"Failed to retrieve profile data from dotsearch.io. Details: {str(e)}")
             else:
                 render_error_card('Unexpected Error', f"An unexpected error occurred: {str(e)}")
                 
