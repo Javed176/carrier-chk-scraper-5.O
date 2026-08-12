@@ -9,47 +9,53 @@ st.title("MC / DOT Background Search")
 
 query_input = st.text_input("Enter MC Number:", placeholder="e.g. 1800000")
 
-def get_carrier_profile(mc_number):
-    # Clean digits and explicitly format with MC- prefix for dotsearch
-    clean_digits = re.sub(r"\D", "", str(mc_number))
-    if not clean_digits:
+def get_dot_from_fmcsa(mc_number):
+    """Instantly resolves an MC number to a USDOT number using FMCSA QCMobile"""
+    clean_mc = re.sub(r"\D", "", str(mc_number))
+    
+    # We use the docket-number endpoint here to guarantee MC -> DOT translation
+    url = f"https://mobile.fmcsa.dot.gov/qc/services/carriers/docket-number/{clean_mc}?webKey=4f03930b80baedfb65a1e78eb3dd9db3d4dca889"
+    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+    
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        if response.status_code == 200:
+            data = response.json()
+            content = data.get("content", [])
+            
+            # QC Mobile returns a dict or list depending on the result
+            if isinstance(content, dict):
+                content = [content]
+                
+            for item in content:
+                carrier = item.get("carrier", item)
+                if carrier and carrier.get("dotNumber"):
+                    return str(carrier.get("dotNumber"))
+    except Exception as e:
+        print(f"FMCSA resolution error: {e}")
+        
+    return None
+
+def get_motus_profile(mc_number):
+    clean_mc = re.sub(r"\D", "", str(mc_number))
+    if not clean_mc:
         return pd.DataFrame()
         
-    mc_formatted = f"MC-{clean_digits}"
-    
+    # Step 1: Get the exact DOT number from the MC number
+    dot_number = get_dot_from_fmcsa(clean_mc)
+    if not dot_number:
+        return pd.DataFrame() # Fails gracefully if MC doesn't exist
+
+    # Step 2: Scrape dotsearch.io for MOTUS data using the resolved DOT number
     session = requests.Session()
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "X-Requested-With": "XMLHttpRequest",
         "Referer": "https://www.dotsearch.io/"
     }
     
+    profile_url = f"https://www.dotsearch.io/dot/{dot_number}"
+    
     try:
-        # Step 1: Send search query with explicit MC- prefix
-        search_url = "https://www.dotsearch.io/Home/Search"
-        payload = {"searchTerm": mc_formatted}
-        
-        search_res = session.post(search_url, data=payload, headers=headers, timeout=10)
-        
-        dot_number = None
-        if search_res.status_code == 200:
-            try:
-                res_json = search_res.json()
-                dot_number = res_json.get("dotNumber") or res_json.get("dot_number")
-            except Exception:
-                # Extract target DOT number from returned redirect path string
-                match = re.search(r"dot/(\d+)", search_res.text)
-                if match:
-                    dot_number = match.group(1)
-
-        # If dotsearch returns the detail page directly or resolved DOT number
-        if dot_number:
-            profile_url = f"https://www.dotsearch.io/dot/{dot_number}"
-        else:
-            # Fallback search if resolution path wasn't JSON
-            profile_url = f"https://www.dotsearch.io/Home/Search?searchTerm={mc_formatted}"
-
-        # Step 2: Fetch profile HTML
         profile_res = session.get(profile_url, headers=headers, timeout=10)
         
         if profile_res.status_code == 200:
@@ -59,13 +65,7 @@ def get_carrier_profile(mc_number):
             name_heading = soup.find("h1")
             company_name = name_heading.get_text(strip=True) if name_heading else "N/A"
             
-            # Extract Resolved DOT Number from page badges if available
-            dot_badge = soup.find(string=re.compile(r"DOT\s*#?\s*\d+", re.I))
-            if dot_badge:
-                dot_match = re.search(r"\d+", dot_badge)
-                if dot_match:
-                    dot_number = dot_match.group(0)
-
+            # Extract Text for Regex Parsing
             page_text = soup.get_text()
             
             entity_type = "Broker" if "Broker" in page_text else ("Carrier" if "Carrier" in page_text else "N/A")
@@ -81,8 +81,8 @@ def get_carrier_profile(mc_number):
             location_val = loc_match.group(1).strip() if loc_match else "N/A"
 
             return pd.DataFrame([{
-                "MC NUMBER": f"MC {clean_digits}",
-                "DOT NUMBER": dot_number or "N/A",
+                "MC NUMBER": f"MC {clean_mc}",
+                "DOT NUMBER": dot_number,
                 "BROKER NAME": company_name,
                 "ENTITY TYPE": entity_type,
                 "OPERATING STATUS": status,
@@ -97,8 +97,8 @@ def get_carrier_profile(mc_number):
     return pd.DataFrame()
 
 if st.button("Search") and query_input:
-    with st.spinner("Fetching MOTUS profile for MC number..."):
-        df = get_carrier_profile(query_input)
+    with st.spinner("Resolving MC and fetching MOTUS data..."):
+        df = get_motus_profile(query_input)
         if not df.empty and df["BROKER NAME"].iloc[0] != "N/A":
             st.success("Successfully loaded MOTUS profile!")
             st.dataframe(df, use_container_width=True)
