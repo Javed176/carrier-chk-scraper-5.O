@@ -121,7 +121,7 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
         except Exception:
             fmcsa_detail = {}
 
-    # 3. Scrape dotsearch using cloudscraper (or direct)
+    # 3. Scrape dotsearch using cloudscraper
     raw_profile = {}
     if dot_number:
         raw_profile = get_carrier_profile(str(dot_number), cache_version=9)  # bump to invalidate old cache
@@ -136,6 +136,7 @@ def process_single_mc_lookup(mc_str: str, api_key: str):
             st.write("**FMCSA basic (docket):**", fmcsa_data)
             st.write("**FMCSA detail (DOT):**", fmcsa_detail)
             st.write("**Raw scraper profile:**", raw_profile)
+            st.write("**Raw HTML preview:**", raw_profile.get('html_preview', 'N/A'))
             st.write("**Merged profile:**", profile)
 
     existing_mcs = [item.get('searched_mc') for item in st.session_state['history']]
