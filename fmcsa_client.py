@@ -63,7 +63,14 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
         status = "Not Authorized"
     else:
         status = "Unknown"
-        
+    
+    # Additional fields we can pull
+    entity_type = carrier.get("entityType", "")
+    operation_class = carrier.get("operationClass", "")
+    power_units = carrier.get("powerUnits", "")
+    drivers = carrier.get("drivers", "")
+    email = carrier.get("email", "")  # May not exist, but we try
+    
     return {
         "dot_number": carrier.get("dotNumber"),
         "legal_name": carrier.get("legalName"),
@@ -74,6 +81,11 @@ def _parse_carrier_response(data: Dict[str, Any]) -> Dict[str, Any]:
         "physical_address": physical_address,
         "phone": carrier.get("phyPhone"),
         "status": status,
+        "entity_type": entity_type,
+        "operation_classification": operation_class,
+        "power_units": power_units,
+        "drivers": drivers,
+        "email": email,
     }
 
 def _handle_response(response: requests.Response) -> Dict[str, Any]:
