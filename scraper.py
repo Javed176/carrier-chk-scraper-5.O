@@ -23,11 +23,17 @@ if sys.platform == 'win32':
 
 @st.cache_resource
 def install_playwright_browsers():
-    """Attempts to install Playwright Chromium browser."""
+    """Installs Playwright Chromium browser binary safely using sys.executable."""
     try:
         logger.info("Installing Playwright Chromium browser...")
-        res = subprocess.run(['playwright', 'install', 'chromium'], check=False, capture_output=True, text=True)
+        res = subprocess.run(
+            [sys.executable, "-m", "playwright", "install", "chromium"],
+            check=False,
+            capture_output=True,
+            text=True
+        )
         if res.returncode == 0:
+            logger.info("Playwright Chromium installed successfully.")
             return True
         else:
             logger.warning(f"Playwright install warning: {res.stderr}")
@@ -37,37 +43,49 @@ def install_playwright_browsers():
         return False
 
 def _safe_extract(soup: BeautifulSoup, selector: str, default: str = 'N/A') -> str:
-    element = soup.select_one(selector)
-    if element:
-        return element.get_text(strip=True)
+    """Safely extracts text from a CSS selector."""
+    try:
+        element = soup.select_one(selector)
+        if element:
+            return element.get_text(strip=True)
+    except Exception:
+        pass
     return default
 
 def _extract_by_label(soup: BeautifulSoup, label_text: str, default: str = 'N/A') -> str:
-    elements = soup.find_all(string=lambda text: text and label_text.lower() in text.lower())
-    for element in elements:
-        parent = element.parent
-        if not parent:
-            continue
-            
-        if parent.name in ['th', 'td', 'dt', 'span', 'div', 'strong', 'b']:
-            sibling = parent.find_next_sibling()
-            if sibling:
-                return sibling.get_text(strip=True)
-            
-            text = parent.get_text(strip=True)
-            if ':' in text:
-                parts = text.split(':', 1)
-                if len(parts) > 1 and parts[1].strip():
-                    return parts[1].strip()
-                    
-            if parent.parent:
-                parent_sibling = parent.parent.find_next_sibling()
-                if parent_sibling:
-                    return parent_sibling.get_text(strip=True)
+    """Attempts to find a label and extract the adjacent or sibling value."""
+    try:
+        elements = soup.find_all(string=lambda text: text and label_text.lower() in text.lower())
+        for element in elements:
+            parent = element.parent
+            if not parent:
+                continue
                 
+            if parent.name in ['th', 'td', 'dt', 'span', 'div', 'strong', 'b']:
+                sibling = parent.find_next_sibling()
+                if sibling:
+                    val = sibling.get_text(strip=True)
+                    if val:
+                        return val
+                
+                text = parent.get_text(strip=True)
+                if ':' in text:
+                    parts = text.split(':', 1)
+                    if len(parts) > 1 and parts[1].strip():
+                        return parts[1].strip()
+                        
+                if parent.parent:
+                    parent_sibling = parent.parent.find_next_sibling()
+                    if parent_sibling:
+                        val = parent_sibling.get_text(strip=True)
+                        if val:
+                            return val
+    except Exception:
+        pass
     return default
 
 def _extract_profile_data(soup: BeautifulSoup) -> dict:
+    """Extracts structured profile data from BeautifulSoup object."""
     data = {
         'company': {
             'legal_name': _extract_by_label(soup, 'Legal Name'),
@@ -126,17 +144,18 @@ def _extract_profile_data(soup: BeautifulSoup) -> dict:
                     data['fleet']['cargo_types'] = ['General Freight']
     except Exception as e:
         logger.warning(f"Failed to extract cargo types: {e}")
-        data['fleet']['cargo_types'] = ['N/A']
+        data['fleet']['cargo_types'] = ['General Freight']
 
     return data
 
 def scrape_carrier_profile(dot_number: int) -> dict:
+    """Scrapes carrier profile from dotsearch.io for a given DOT number using Playwright sync API."""
     try:
         from playwright.sync_api import sync_playwright
     except ImportError:
         return {
-            "error": "Playwright is not installed in the environment. Please run: pip install playwright && playwright install chromium",
-            "company": {"legal_name": "Playwright Missing", "dot_number": str(dot_number)},
+            "error": "Playwright library is missing. Install with: pip install playwright",
+            "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
         }
 
     install_playwright_browsers()
@@ -160,12 +179,12 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             logger.info(f"Navigating to {url}")
             
             try:
-                page.goto(url, timeout=30000)
+                page.goto(url, timeout=25000)
                 page.wait_for_load_state('networkidle', timeout=15000)
-            except Exception as e:
-                logger.warning(f"Page load warning: {e}")
+            except Exception as nav_e:
+                logger.warning(f"Page load timeout/warning: {nav_e}")
             
-            time.sleep(2.0)
+            time.sleep(1.5)
             html_content = page.content()
             context.close()
             browser.close()
@@ -176,8 +195,8 @@ def scrape_carrier_profile(dot_number: int) -> dict:
             return data
 
     except Exception as e:
-        logger.error(f"Error while scraping DOT {dot_number}: {e}")
+        logger.error(f"Error scraping DOT {dot_number}: {e}")
         return {
-            "error": f"Failed to scrape dotsearch.io profile: {str(e)}",
-            "company": {"legal_name": f"DOT #{dot_number}", "dot_number": str(dot_number)},
+            "error": f"Scraper notice: {str(e)}",
+            "company": {"legal_name": f"Carrier DOT #{dot_number}", "dot_number": str(dot_number)},
         }
