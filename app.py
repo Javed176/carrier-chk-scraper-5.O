@@ -156,7 +156,7 @@ def main():
     with col_stop:
         st.write("")
         st.write("")
-        stop_btn = st.button('🛑 Stop', kind='secondary', use_container_width=True)
+        stop_btn = st.button('🛑 Stop', type='secondary', use_container_width=True)
         
     with col_clear:
         st.write("")
