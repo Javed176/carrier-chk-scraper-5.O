@@ -1,4 +1,5 @@
 import streamlit as st
+import pandas as pd
 
 def inject_custom_css():
     """Injects custom CSS for iOS 3D Glassmorphism theme with tactile 3D lighting buttons."""
@@ -21,13 +22,11 @@ def inject_custom_css():
             --accent-purple: #A855F7;
         }
 
-        /* Global Typography & Background */
         html, body, [class*="css"] {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             color: var(--text-main);
         }
 
-        /* iOS Glassmorphism Card Container */
         .glass-card {
             background: var(--glass-card-bg);
             backdrop-filter: blur(20px) saturate(180%);
@@ -47,7 +46,6 @@ def inject_custom_css():
             box-shadow: 0 30px 60px rgba(99, 102, 241, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.3);
         }
 
-        /* iOS Header Text Gradient */
         .gradient-text {
             background: var(--primary-gradient);
             -webkit-background-clip: text;
@@ -57,7 +55,6 @@ def inject_custom_css():
             letter-spacing: -0.02em;
         }
 
-        /* 3D Tactile Animated Buttons */
         .stButton > button {
             background: linear-gradient(135deg, #6366F1 0%, #8B5CF6 50%, #D946EF 100%) !important;
             border: 1px solid rgba(255, 255, 255, 0.3) !important;
@@ -86,7 +83,6 @@ def inject_custom_css():
             box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3), inset 0 2px 4px rgba(0, 0, 0, 0.3) !important;
         }
 
-        /* Secondary/Stop Button Styling */
         div[data-testid="stButton"] > button[kind="secondary"] {
             background: linear-gradient(135deg, #EF4444 0%, #DC2626 100%) !important;
             box-shadow: 0 10px 25px -5px rgba(239, 68, 68, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.4) !important;
@@ -95,7 +91,6 @@ def inject_custom_css():
             box-shadow: 0 18px 35px -5px rgba(239, 68, 68, 0.7), 0 0 25px rgba(239, 68, 68, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.6) !important;
         }
 
-        /* Status Badges */
         .badge {
             display: inline-flex;
             align-items: center;
@@ -113,7 +108,6 @@ def inject_custom_css():
         .badge-inactive { background-color: rgba(245, 158, 11, 0.15); color: #FBBF24; border: 1px solid rgba(245, 158, 11, 0.4); }
         .badge-revoked { background-color: rgba(239, 68, 68, 0.15); color: #F87171; border: 1px solid rgba(239, 68, 68, 0.4); }
         .badge-gray { background-color: rgba(148, 163, 184, 0.15); color: #CBD5E1; border: 1px solid rgba(148, 163, 184, 0.4); }
-        
         .badge-oos {
             background-color: rgba(239, 68, 68, 0.2);
             color: #F87171;
@@ -127,7 +121,6 @@ def inject_custom_css():
             100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
         }
 
-        /* 3D Glass Data Table */
         .glass-table-container {
             border-radius: 16px;
             overflow: hidden;
@@ -167,7 +160,6 @@ def inject_custom_css():
             background: rgba(255, 255, 255, 0.05);
         }
 
-        /* Metric Cards */
         .metric-container {
             text-align: center;
             padding: 18px;
@@ -176,11 +168,10 @@ def inject_custom_css():
             border: 1px solid var(--glass-border);
             box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.1);
         }
-        
+
         .metric-label { font-size: 0.8rem; color: var(--text-muted); margin-bottom: 4px; font-weight: 500; }
         .metric-value { font-size: 1.6rem; font-weight: 800; color: var(--text-main); font-family: 'JetBrains Mono', monospace; }
 
-        /* Chips */
         .chip {
             display: inline-block;
             padding: 6px 14px;
@@ -231,7 +222,6 @@ def render_status_badge(status: str) -> str:
         cls = 'badge-active'
         s_text = 'AUTHORIZED' if s == 'Y' else s
     elif s in ['INACTIVE', 'NOT AUTHORIZED', 'N']:
-        # Red for inactive / not authorized
         cls = 'badge-revoked'
         s_text = 'NOT AUTHORIZED' if s == 'N' else s
     elif s in ['CONDITIONAL']:
@@ -250,11 +240,14 @@ def render_status_badge(status: str) -> str:
     return f'<span class="badge {cls}">{s_text}</span>'
 
 def render_history_table(history_list: list):
-    """Renders all searched carriers in a clean 3D glass data table with exactly 5 columns."""
+    """
+    Renders the master history table as a native Streamlit dataframe.
+    Columns: MC Number, Carrier/Broker Name, Operating Status, Email Address, Location.
+    """
     if not history_list:
         return
 
-    rows_html = ""
+    rows = []
     for item in reversed(history_list):
         comp = item.get('company', {})
         contact = item.get('contact', {})
@@ -267,45 +260,34 @@ def render_history_table(history_list: list):
             
         name = comp.get('legal_name', 'Unknown Carrier')
         dba = comp.get('dba_name', '')
-        name_display = f"<strong>{name}</strong>"
         if dba:
-            name_display += f"<br/><span style='color:#94A3B8; font-size:0.8rem;'>DBA: {dba}</span>"
-            
+            name = f"{name} (DBA: {dba})"
+        
         status = comp.get('operating_status', 'UNKNOWN')
+        # Map status to emoji + text
+        status_upper = str(status).upper()
+        if status_upper in ['ACTIVE', 'AUTHORIZED', 'SATISFACTORY', 'Y']:
+            status_display = "🟢 Active"
+        elif status_upper in ['INACTIVE', 'NOT AUTHORIZED', 'N', 'REVOKED', 'UNSATISFACTORY']:
+            status_display = "🔴 Inactive"
+        elif status_upper == 'OUT OF SERVICE':
+            status_display = "🔴 Out of Service"
+        else:
+            status_display = "⚪ Unknown"
+        
         email = contact.get('email', 'N/A')
         location = contact.get('physical_address', 'N/A')
-
-        badge_html = render_status_badge(status)
         
-        rows_html += f"""
-        <tr>
-            <td style="font-family: 'JetBrains Mono', monospace; font-weight: 700; color: #A5B4FC;">{mc}</td>
-            <td>{name_display}</td>
-            <td>{badge_html}</td>
-            <td>{email}</td>
-            <td>{location}</td>
-        </tr>
-        """
-
-    html = f"""
-    <div class="glass-table-container">
-        <table class="glass-table">
-            <thead>
-                <tr>
-                    <th>MC NUMBER</th>
-                    <th>CARRIER / BROKER NAME</th>
-                    <th>OPERATING STATUS</th>
-                    <th>EMAIL ADDRESS</th>
-                    <th>LOCATION</th>
-                </tr>
-            </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
-        </table>
-    </div>
-    """
-    st.markdown(html, unsafe_allow_html=True)
+        rows.append({
+            'MC Number': mc,
+            'Carrier / Broker Name': name,
+            'Operating Status': status_display,
+            'Email Address': email,
+            'Location': location
+        })
+    
+    df = pd.DataFrame(rows, columns=['MC Number', 'Carrier / Broker Name', 'Operating Status', 'Email Address', 'Location'])
+    st.dataframe(df, use_container_width=True, hide_index=True)
 
 def render_company_card(data: dict):
     if not data:
@@ -544,15 +526,11 @@ def render_error_card(title: str, message: str, error_type: str = 'error'):
 def render_fmcsa_summary(data: dict):
     """
     Renders a summary card of FMCSA registration details.
-
-    Accepts either:
-    - A flat dict as returned by fmcsa_client.resolve_mc_to_usdot()
-    - A merged profile dict that contains 'company' and 'contact' sub-dicts.
+    Accepts either a flat dict or a merged profile dict.
     """
     if not data:
         return
 
-    # If data has a 'company' sub-dict, we are dealing with merged profile data.
     if 'company' in data:
         comp = data.get('company', {})
         contact = data.get('contact', {})
@@ -565,7 +543,6 @@ def render_fmcsa_summary(data: dict):
         phone = contact.get('phone', 'N/A')
         email = contact.get('email', 'N/A')
     else:
-        # Flat FMCSA data.
         legal_name = data.get('legal_name', 'Unknown')
         dba_name = data.get('dba_name', '')
         dot_number = data.get('dot_number', 'N/A')
@@ -575,7 +552,6 @@ def render_fmcsa_summary(data: dict):
         phone = data.get('phone', 'N/A')
         email = data.get('email', 'N/A')
 
-    # Build the HTML card.
     html = f"""
     <div class="glass-card">
         <h3 style="margin-top:0; margin-bottom:16px;">📋 FMCSA Registration Summary</h3>
