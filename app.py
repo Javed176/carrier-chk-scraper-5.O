@@ -26,13 +26,6 @@ try:
         inject_custom_css,
         render_header,
         render_history_table,
-        render_company_card,
-        render_contact_section,
-        render_operations_section,
-        render_safety_section,
-        render_insurance_section,
-        render_authority_section,
-        render_fmcsa_summary,
         render_error_card
     )
 except Exception as import_err:
@@ -105,7 +98,6 @@ def merge_fmcsa_and_profile(fmcsa_data: dict, profile_data: dict) -> dict:
         contact['physical_address'] = f.get('physical_address', contact.get('physical_address', 'N/A'))
     if not contact.get('phone') or contact.get('phone') in ['N/A', '']:
         contact['phone'] = f.get('phone', contact.get('phone', 'N/A'))
-    # Email may not be in FMCSA, but keep existing if any
     if not contact.get('email'):
         contact['email'] = f.get('email', contact.get('email', 'N/A'))
     p['contact'] = contact
@@ -206,7 +198,6 @@ def main():
             return
             
         try:
-            # Strip non-digits to get starting integer
             import re
             cleaned_start = re.sub(r'\D', '', mc_input)
             st.session_state['current_auto_mc'] = int(cleaned_start)
@@ -237,47 +228,17 @@ def main():
             try:
                 process_single_mc_lookup(str(curr_mc), api_key)
                 st.session_state['current_auto_mc'] += 1
-                time.sleep(1.0) # Brief pause between requests
+                time.sleep(1.0)
                 st.rerun()
             except Exception as auto_err:
-                logger_msg = f"Skipping MC {curr_mc}: {auto_err}"
-                st.toast(logger_msg)
+                st.toast(f"Skipping MC {curr_mc}: {auto_err}")
                 st.session_state['current_auto_mc'] += 1
                 st.rerun()
 
-    # Display Master 3D Glass Data Table (All Searched Carriers)
+    # Display ONLY the master history table
     if st.session_state['history']:
         st.subheader("📊 Searched Carriers Master History")
         render_history_table(st.session_state['history'])
-        
-        # Latest Carrier Full Details Section
-        latest_carrier = st.session_state['history'][-1]
-        st.divider()
-        st.subheader(f"🔍 Carrier Deep-Dive Profile: {latest_carrier.get('company', {}).get('legal_name', '')}")
-        
-        render_company_card(latest_carrier.get('company', {}))
-            
-        col_a, col_b = st.columns(2)
-        with col_a:
-            render_contact_section(latest_carrier.get('contact', {}))
-        with col_b:
-            render_operations_section(latest_carrier.get('fleet', {}))
-        
-        render_safety_section(latest_carrier.get('safety', {}))
-            
-        col_c, col_d = st.columns(2)
-        with col_c:
-            render_insurance_section(latest_carrier.get('insurance', {}))
-        with col_d:
-            render_authority_section(latest_carrier.get('authority', {}))
-
-    st.divider()
-    st.markdown(
-        "<div style='text-align: center; font-size: 12px; color: #64748B;'>"
-        "Disclaimer: Data is sourced from FMCSA QCMobile API & dotsearch.io. Informational use only."
-        "</div>", 
-        unsafe_allow_html=True
-    )
 
 if __name__ == '__main__':
     main()
